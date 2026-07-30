@@ -25,11 +25,12 @@ songs:
     artist: "탑현"
     title: "바다의 왕자"
 
-  - worksheet: "피프티"
-    query: "Oops My Bad 피프티피프티"
-    artist: "FIFTY FIFTY"
-    title: "Oops, My Bad"
-
+  # 2026-07-29: 피프티(Oops, My Bad) 제외 → 도유카 - Around 추가
+  # title 생략 - 아티스트로만 매칭 (제목에 부가 표기가 붙어 나오는 경우 있음)
+  - worksheet: "도유카 - Around"
+    query: "around 도유카"
+    artist: "도유카"
+    
   - worksheet: "한 걸음씩"
     query: "#안녕 한 걸음씩 멀어지는 너에게"
     artist: "#안녕"

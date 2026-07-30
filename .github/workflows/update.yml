@@ -1,0 +1,33 @@
+name: streaming-update
+
+on:
+  schedule:
+    # cron 은 UTC 기준. KST = UTC+9
+    - cron: "0 1 * * *"    # 매일 10:00 KST  -> 오전(J열)
+    - cron: "0 7 * * *"    # 매일 16:00 KST  -> 오후(K열)
+  workflow_dispatch:        # 수동 실행 버튼
+    inputs:
+      slot:
+        description: "morning | afternoon | auto"
+        default: "auto"
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run updater
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          YTMUSIC_AUTH: ${{ secrets.YTMUSIC_AUTH }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          SLOT="${{ github.event.inputs.slot }}"
+          python updater.py --slot "${SLOT:-auto}"

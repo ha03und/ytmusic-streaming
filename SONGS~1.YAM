@@ -1,0 +1,94 @@
+# 스트리밍 현황(주요곡) 자동 집계 대상 곡 설정
+# - worksheet: 구글 시트의 탭(시트) 이름과 정확히 일치해야 함
+# - query    : 유튜브 뮤직 검색어
+# - artist   : 검색 결과에서 이 아티스트를 포함하는 곡만 매칭 (동명이곡 구분)
+# - title    : (선택) 정확히 일치해야 하는 곡 제목. 생략 시 아티스트로만 매칭
+# - mode     : normal(기본) | dream(태연 꿈: 두 버전+메모)
+#
+# 값은 유튜브 뮤직에 표시되는 "○○만회/○○억회"와 동일하게 내림 처리됩니다
+# (updater.py 의 format_count 참고). 정확한 원본 조회수로 저장하려면
+# 환경변수 ROUND_TO_MAN=0 으로 실행하세요.
+
+songs:
+  - worksheet: "경서 - 슈퍼스타"
+    query: "경서 슈퍼스타"
+    artist: "경서"
+    title: "슈퍼스타"
+
+  - worksheet: "파테코 - Rainy day"
+    query: "Rainy day 파테코"
+    artist: "PATEKO"
+    title: "Rainy day (feat. ASH ISLAND, Skinny Brown)"
+
+  - worksheet: "탑현 - 바다의 왕자"
+    query: "바다의 왕자 탑현"
+    artist: "탑현"
+    title: "바다의 왕자"
+
+  - worksheet: "피프티"
+    query: "Oops My Bad 피프티피프티"
+    artist: "FIFTY FIFTY"
+    title: "Oops, My Bad"
+
+  - worksheet: "한 걸음씩"
+    query: "#안녕 한 걸음씩 멀어지는 너에게"
+    artist: "#안녕"
+    title: "한 걸음씩 멀어지는 너에게"
+
+  - worksheet: "우디 - 이 사랑"
+    query: "이 사랑 우디"
+    artist: "우디"
+    title: "이 사랑"
+
+  - worksheet: "치즈-이렇게"
+    query: "이렇게 좋아해본 적이 없어요 치즈"
+    artist: "CHEEZE"
+    title: "이렇게 좋아해 본 적이 없어요"
+
+  - worksheet: "보넥도-이렇게"
+    query: "이렇게 좋아해본 적이 없어요 BOYNEXTDOOR"
+    artist: "BOYNEXTDOOR"
+    title: "이렇게 좋아해 본 적이 없어요"
+
+  - worksheet: "fadeaway"
+    query: "fadeaway BOYNEXTDOOR"
+    artist: "BOYNEXTDOOR"
+    title: "Fadeaway"
+
+  - worksheet: "럽미백"
+    query: "럽미백 프로미스나인"
+    artist: "fromis_9"
+    title: "Love Me Back"
+
+  - worksheet: "10CM"
+    query: "서랍 10CM"
+    artist: "10CM"
+    title: "서랍"
+
+  - worksheet: "샘김"
+    query: "여름비 샘김"
+    artist: "샘김"
+    title: "여름비"
+
+  - worksheet: "이별후회"
+    query: "이별후회 김나영"
+    artist: "김나영"
+    title: "이별후회"
+
+  # 특수곡: 태연 '꿈' — 두 버전이 검색됨
+  #  * 셀 값  = 메인(OST Part.3 싱글) 재생수
+  #  * 셀 메모 = "part.3 ver ○○만회" (웰컴투 삼달리 OST SPECIAL 버전)
+  - worksheet: "꿈"
+    query: "꿈 태연"
+    artist: "태연"
+    title: "꿈"
+    mode: "dream"
+    main_album_contains: "Part.3"      # 메인(셀 값)으로 쓸 앨범 키워드
+    note_album_contains: "SPECIAL"     # 메모로 쓸 part.3 ver 앨범 키워드
+
+  # V(뷔) — 셀 값만 입력. 메모는 별도 스크립트가 관리하므로 절대 건드리지 않음
+  # (updater.py 는 값 셀만 update 하므로 기존 메모는 그대로 유지됨)
+  - worksheet: "V"
+    query: "Christmas Tree V (뷔)"
+    artist: "V"
+    title: "Christmas Tree"

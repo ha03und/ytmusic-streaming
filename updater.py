@@ -102,13 +102,18 @@ def col_letter(col: int) -> str:
 # ----------------------------------------------------------------------------
 # 인증
 # ----------------------------------------------------------------------------
-def ensure_auth_file() -> str:
-    """browser.json 을 준비하고 경로를 반환."""
+def ensure_auth_file() -> str | None:
+    """browser.json 을 준비하고 경로를 반환. 없으면 None(비로그인 모드).
+
+    검색/재생수 조회는 공개 데이터라 인증 없이도 동작한다.
+    YTMUSIC_AUTH 를 설정하면 그 값을 browser.json 으로 써서 로그인 모드로 쓴다.
+    """
     if os.environ.get("YTMUSIC_AUTH") and not os.path.exists(_AUTH_PATH):
         with open(_AUTH_PATH, "w", encoding="utf-8") as f:
             f.write(os.environ["YTMUSIC_AUTH"])
     if not os.path.exists(_AUTH_PATH):
-        sys.exit("browser.json 이 없습니다. `ytmusicapi browser` 로 생성하거나 YTMUSIC_AUTH 를 설정하세요.")
+        print("[info] browser.json 없음 → 비로그인 모드로 조회합니다.")
+        return None
     return _AUTH_PATH
 
 
@@ -118,7 +123,8 @@ _tl = threading.local()
 def get_yt() -> YTMusic:
     """스레드별 YTMusic 인스턴스(requests 세션 공유 회피)."""
     if not hasattr(_tl, "yt"):
-        _tl.yt = YTMusic(_AUTH_PATH)
+        auth = _AUTH_PATH if os.path.exists(_AUTH_PATH) else None
+        _tl.yt = YTMusic(auth)
     return _tl.yt
 
 

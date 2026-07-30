@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -124,7 +125,9 @@ def get_yt() -> YTMusic:
     """스레드별 YTMusic 인스턴스(requests 세션 공유 회피)."""
     if not hasattr(_tl, "yt"):
         auth = _AUTH_PATH if os.path.exists(_AUTH_PATH) else None
-        _tl.yt = YTMusic(auth)
+        # 한국어 로케일: 검색 결과의 재생수가 "○○만회 / ○.○억회" 로 와서
+        # 시트에 수작업으로 넣던 값과 동일하게 맞출 수 있다.
+        _tl.yt = YTMusic(auth, language="ko", location="KR")
     return _tl.yt
 
 
@@ -146,9 +149,50 @@ def load_sheet():
 #   화면에 표시하는 "○○만회 재생" 과 동일하며, 검색 결과 카드에 숫자가 없어도
 #   API 로는 항상 얻을 수 있다(수작업 때처럼 앨범 페이지를 열 필요가 없음).
 # ----------------------------------------------------------------------------
+_VIEWS_RE = re.compile(r"([\d,.]+)\s*(억|만|천)?")
+
+
+def parse_ko_views(text: str) -> int | None:
+    """검색 결과의 한국어 재생수 표기를 정수로. 예) '26만회'->260000, '1.8억회'->180000000"""
+    if not text:
+        return None
+    t = str(text).replace(",", "").replace("회", "").strip()
+    m = _VIEWS_RE.match(t)
+    if not m:
+        return None
+    try:
+        num = float(m.group(1))
+    except ValueError:
+        return None
+    unit = m.group(2)
+    mult = {"억": 100_000_000, "만": 10_000, "천": 1_000}.get(unit or "", 1)
+    return int(round(num * mult))
+
+
+def views_of(item: dict) -> int:
+    """검색 결과 항목의 재생수. 검색에 없으면 player(get_song)로 폴백."""
+    v = parse_ko_views(item.get("views"))
+    if v:
+        return v
+    song = retry(get_yt().get_song, item["videoId"])
+    details = song.get("videoDetails") or {}
+    if "viewCount" not in details:
+        status = (song.get("playabilityStatus") or {}).get("status")
+        raise RuntimeError(f"재생수를 읽지 못함 (검색결과에 없음, player status={status})")
+    return int(details["viewCount"])
+
+
 def get_view_count(video_id: str) -> int:
     song = retry(get_yt().get_song, video_id)
     return int(song["videoDetails"]["viewCount"])
+
+
+def _title_ok(title: str, want_title: str | None) -> bool:
+    """제목 일치. 완전일치 우선, 안 되면 부분 포함으로 완화(부제/피처링 표기 차이 대응)."""
+    if not want_title:
+        return True
+    t = norm(title)
+    return t == want_title or want_title in t or t in want_title
 
 
 def find_song(cfg: dict) -> dict | None:
@@ -156,6 +200,7 @@ def find_song(cfg: dict) -> dict | None:
     results = retry(get_yt().search, cfg["query"], filter="songs")
     want_artist = norm(cfg["artist"])
     want_title = norm(cfg.get("title", "")) or None
+    fallback = None
     for r in results:
         artists = " ".join(a["name"] for a in r.get("artists", []))
         title = r.get("title", "")
@@ -163,17 +208,18 @@ def find_song(cfg: dict) -> dict | None:
             continue  # (Inst.) 버전 제외
         if want_artist not in norm(artists):
             continue
-        if want_title and norm(title) != want_title:
-            continue
-        return r
-    return None
+        if fallback is None:
+            fallback = r  # 아티스트만 맞는 첫 곡
+        if _title_ok(title, want_title):
+            return r
+    return fallback
 
 
 def read_normal(cfg: dict) -> dict:
     song = find_song(cfg)
     if not song:
         raise RuntimeError(f"곡을 찾지 못함: {cfg['query']} / {cfg['artist']}")
-    views = get_view_count(song["videoId"])
+    views = views_of(song)
     return {"value": format_count(views), "raw": views}
 
 
@@ -183,21 +229,23 @@ def read_dream(cfg: dict) -> dict:
     results = retry(get_yt().search, cfg["query"], filter="songs")
     main_kw = norm(cfg["main_album_contains"])
     note_kw = norm(cfg["note_album_contains"])
-    main_id = note_id = None
+    want_title = norm(cfg["title"])
+    want_artist = norm(cfg["artist"])
+    main_item = note_item = None
     for r in results:
-        if norm(r.get("title", "")) != norm(cfg["title"]):
+        if not _title_ok(r.get("title", ""), want_title):
             continue
-        if norm(" ".join(a["name"] for a in r.get("artists", []))) != norm(cfg["artist"]):
+        if want_artist not in norm(" ".join(a["name"] for a in r.get("artists", []))):
             continue
         album = norm((r.get("album") or {}).get("name", ""))
-        if main_kw in album and not main_id:
-            main_id = r["videoId"]
-        elif note_kw in album and not note_id:
-            note_id = r["videoId"]
-    if not main_id or not note_id:
+        if main_kw in album and not main_item:
+            main_item = r
+        elif note_kw in album and not note_item:
+            note_item = r
+    if not main_item or not note_item:
         raise RuntimeError("꿈 두 버전(메인/part.3 ver)을 모두 찾지 못함 - songs.yaml 앨범 키워드 확인")
-    main_views = get_view_count(main_id)
-    note_views = get_view_count(note_id)
+    main_views = views_of(main_item)
+    note_views = views_of(note_item)
     return {
         "value": format_count(main_views),
         "raw": main_views,

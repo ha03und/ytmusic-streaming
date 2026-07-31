@@ -195,10 +195,26 @@ def _title_ok(title: str, want_title: str | None) -> bool:
     return t == want_title or want_title in t or t in want_title
 
 
+def artist_aliases(cfg: dict) -> list[str]:
+    """songs.yaml 의 artist 는 문자열 또는 목록.
+
+    유튜브뮤직을 한국어(ko)로 조회하면 아티스트명이 한글로 온다
+    (예: fromis_9 -> 프로미스나인). 표기가 바뀔 수 있는 팀은 목록으로 적어둔다.
+    """
+    a = cfg["artist"]
+    names = a if isinstance(a, list) else [a]
+    return [norm(n) for n in names if norm(n)]
+
+
+def _artist_ok(artists: str, wants: list[str]) -> bool:
+    a = norm(artists)
+    return any(w in a for w in wants)
+
+
 def find_song(cfg: dict) -> dict | None:
     """검색 결과에서 아티스트(+제목)가 일치하는 첫 곡을 반환."""
     results = retry(get_yt().search, cfg["query"], filter="songs")
-    want_artist = norm(cfg["artist"])
+    wants = artist_aliases(cfg)
     want_title = norm(cfg.get("title", "")) or None
     fallback = None
     for r in results:
@@ -206,7 +222,7 @@ def find_song(cfg: dict) -> dict | None:
         title = r.get("title", "")
         if "inst" in norm(title) and "inst" not in (want_title or ""):
             continue  # (Inst.) 버전 제외
-        if want_artist not in norm(artists):
+        if not _artist_ok(artists, wants):
             continue
         if fallback is None:
             fallback = r  # 아티스트만 맞는 첫 곡
@@ -230,12 +246,12 @@ def read_dream(cfg: dict) -> dict:
     main_kw = norm(cfg["main_album_contains"])
     note_kw = norm(cfg["note_album_contains"])
     want_title = norm(cfg["title"])
-    want_artist = norm(cfg["artist"])
+    wants = artist_aliases(cfg)
     main_item = note_item = None
     for r in results:
         if not _title_ok(r.get("title", ""), want_title):
             continue
-        if want_artist not in norm(" ".join(a["name"] for a in r.get("artists", []))):
+        if not _artist_ok(" ".join(a["name"] for a in r.get("artists", [])), wants):
             continue
         album = norm((r.get("album") or {}).get("name", ""))
         if main_kw in album and not main_item:
@@ -333,6 +349,21 @@ def main():
         if str(cur).strip() not in ("", "None"):
             report.append((ws, "건너뜀", f"이미 값 있음({cur})"))
             continue
+
+        # 참고용 경고(기입은 그대로 진행). 재생수가 직전 기록보다 작으면
+        # 다른 곡을 잡았을 수 있으니 로그에 표시만 해준다.
+        # 유튜브뮤직 쪽 일시적 오류로 값이 튈 수도 있어 막지는 않는다.
+        prev = None
+        for rv in reversed(c_vals[: row - 1]):
+            if rv and str(rv[0]).strip() not in ("", "None"):
+                try:
+                    prev = int(str(rv[0]).replace(",", "").strip())
+                except ValueError:
+                    prev = None
+                break
+        if prev is not None and d["value"] < prev:
+            print(f"[주의] {ws}: 직전값({prev:,})보다 작음 → 곡 매칭 확인 권장")
+
         a1 = f"{cl}{row}"
         updates.append({"range": f"'{ws}'!{a1}", "values": [[d["value"]]]})
         if d.get("note"):
@@ -351,7 +382,8 @@ def main():
     width = max((len(r[0]) for r in report), default=4)
     for ws, cell, val in report:
         print(f"  {ws:<{width}}  {cell:<8}  {val}")
-    print(f"\n입력 {len(updates)}곡 / 건너뜀 {len(report) - len(updates)}곡 / 오류 {len(errors)}곡")
+    skipped = sum(1 for _, cell, _ in report if cell == "건너뜀")
+    print(f"\n입력 {len(updates)}곡 / 건너뜀 {skipped}곡 / 오류 {len(errors)}곡")
 
     if errors:
         print("실패: " + ", ".join(n for n, _ in errors), file=sys.stderr)

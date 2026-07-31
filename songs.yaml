@@ -17,7 +17,7 @@ songs:
 
   - worksheet: "파테코 - Rainy day"
     query: "Rainy day 파테코"
-    artist: "PATEKO"
+    artist: ["PATEKO", "파테코"]
     title: "Rainy day (feat. ASH ISLAND, Skinny Brown)"
 
   - worksheet: "탑현 - 바다의 왕자"
@@ -26,11 +26,11 @@ songs:
     title: "바다의 왕자"
 
   # 2026-07-29: 피프티(Oops, My Bad) 제외 → 도유카 - Around 추가
-  # title 생략 - 아티스트로만 매칭 (제목에 부가 표기가 붙어 나오는 경우 있음)
+  # title 은 앨범명이 붙어 나오는 경우가 있어 생략(아티스트로만 매칭)
   - worksheet: "도유카 - Around"
     query: "around 도유카"
     artist: "도유카"
-    
+
   - worksheet: "한 걸음씩"
     query: "#안녕 한 걸음씩 멀어지는 너에게"
     artist: "#안녕"
@@ -38,27 +38,29 @@ songs:
 
   - worksheet: "우디 - 이 사랑"
     query: "이 사랑 우디"
-    artist: "우디"
+    artist: ["우디", "Woody"]
     title: "이 사랑"
 
   - worksheet: "치즈-이렇게"
     query: "이렇게 좋아해본 적이 없어요 치즈"
-    artist: "CHEEZE"
+    artist: ["CHEEZE", "치즈"]
     title: "이렇게 좋아해 본 적이 없어요"
 
   - worksheet: "보넥도-이렇게"
     query: "이렇게 좋아해본 적이 없어요 BOYNEXTDOOR"
-    artist: "BOYNEXTDOOR"
+    artist: ["BOYNEXTDOOR", "보이넥스트도어"]
     title: "이렇게 좋아해 본 적이 없어요"
 
   - worksheet: "fadeaway"
     query: "fadeaway BOYNEXTDOOR"
-    artist: "BOYNEXTDOOR"
+    artist: ["BOYNEXTDOOR", "보이넥스트도어"]
     title: "Fadeaway"
 
+  # 검색어는 "럽미백" 한 단어로 충분 (유튜브뮤직에서 바로 뜸)
+  # 한국어 조회 시 아티스트가 "프로미스나인" 으로 오므로 두 표기 모두 등록
   - worksheet: "럽미백"
-    query: "럽미백 프로미스나인"
-    artist: "fromis_9"
+    query: "럽미백"
+    artist: ["프로미스나인", "fromis_9"]
     title: "Love Me Back"
 
   - worksheet: "10CM"
@@ -68,7 +70,7 @@ songs:
 
   - worksheet: "샘김"
     query: "여름비 샘김"
-    artist: "샘김"
+    artist: ["샘김", "Sam Kim"]
     title: "여름비"
 
   - worksheet: "이별후회"
@@ -91,5 +93,5 @@ songs:
   # (updater.py 는 값 셀만 update 하므로 기존 메모는 그대로 유지됨)
   - worksheet: "V"
     query: "Christmas Tree V (뷔)"
-    artist: "V"
+    artist: ["뷔", "V"]
     title: "Christmas Tree"

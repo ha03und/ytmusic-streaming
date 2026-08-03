@@ -279,10 +279,14 @@ def read_one(cfg: dict) -> dict:
 # 예약(cron)별 고정 열. GitHub Actions 예약은 수 시간 지연될 수 있어서
 # 실행 "시각"으로 오전/오후를 판별하면, 늦게 돈 오전 실행이 오후로 잡혀 J열이 빈다.
 # 그래서 "어느 예약에서 왔는지"로 열을 정한다.
+#
+# ※ update.yml 의 cron 을 바꾸면 여기도 같이 추가할 것.
+#   (없는 cron 이면 실행 시각으로 판별하는 예전 방식으로 돌아간다)
 CRON_SLOT = {
     "0 0 * * *": "morning",     # 09:00 KST 예약 -> 항상 J열
     "0 1 * * *": "morning",     # (구) 10:00 KST 예약
-    "0 7 * * *": "afternoon",   # 16:00 KST 예약 -> 항상 K열
+    "55 6 * * *": "afternoon",  # 15:55 KST 예약 -> 항상 K열
+    "0 7 * * *": "afternoon",   # (구) 16:00 KST 예약
 }
 
 

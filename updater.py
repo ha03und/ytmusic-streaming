@@ -276,9 +276,38 @@ def read_one(cfg: dict) -> dict:
 # ----------------------------------------------------------------------------
 # 메인
 # ----------------------------------------------------------------------------
+# 예약(cron)별 고정 열. GitHub Actions 예약은 수 시간 지연될 수 있어서
+# 실행 "시각"으로 오전/오후를 판별하면, 늦게 돈 오전 실행이 오후로 잡혀 J열이 빈다.
+# 그래서 "어느 예약에서 왔는지"로 열을 정한다.
+CRON_SLOT = {
+    "0 0 * * *": "morning",     # 09:00 KST 예약 -> 항상 J열
+    "0 1 * * *": "morning",     # (구) 10:00 KST 예약
+    "0 7 * * *": "afternoon",   # 16:00 KST 예약 -> 항상 K열
+}
+
+
+def slot_from_schedule() -> str | None:
+    """GitHub Actions 예약 실행이면 어떤 cron 이 띄웠는지 보고 슬롯을 정한다."""
+    path = os.environ.get("GITHUB_EVENT_PATH")
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            sched = json.load(f).get("schedule")
+    except Exception:  # noqa: BLE001
+        return None
+    if not sched:
+        return None
+    slot = CRON_SLOT.get(sched.strip())
+    print(f"[info] 예약 cron='{sched}' -> slot={slot or '판별불가(시각으로 대체)'}")
+    return slot
+
+
 def resolve_slot(slot: str) -> tuple[str, int]:
     if slot == "auto":
-        slot = "morning" if datetime.now(KST).hour < 12 else "afternoon"
+        slot = slot_from_schedule() or (
+            "morning" if datetime.now(KST).hour < 12 else "afternoon"
+        )
     return slot, (COL_MORNING if slot == "morning" else COL_AFTERNOON)
 
 

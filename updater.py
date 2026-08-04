@@ -282,12 +282,24 @@ def read_one(cfg: dict) -> dict:
 #
 # ※ update.yml 의 cron 을 바꾸면 여기도 같이 추가할 것.
 #   (없는 cron 이면 실행 시각으로 판별하는 예전 방식으로 돌아간다)
+#
+# 예약이 아예 실행되지 않는 날이 있어서(GitHub 부하로 드롭됨) 오전·오후 각각
+# 30분 간격으로 여러 번 걸어둔다. 먼저 성공한 실행이 값을 넣고, 뒤에 오는
+# 실행은 "이미 값 있음"으로 건너뛰므로 중복 기입은 생기지 않는다.
 CRON_SLOT = {
-    "50 0 * * *": "morning",    # 09:50 KST 예약 -> 항상 J열
-    "0 0 * * *": "morning",     # (구) 09:00 KST 예약
-    "0 1 * * *": "morning",     # (구) 10:00 KST 예약
-    "55 6 * * *": "afternoon",  # 15:55 KST 예약 -> 항상 K열
-    "0 7 * * *": "afternoon",   # (구) 16:00 KST 예약
+    # 오전 -> 항상 J열
+    "50 0 * * *": "morning",    # 09:50 KST
+    "20 1 * * *": "morning",    # 10:20 KST
+    "50 1 * * *": "morning",    # 10:50 KST
+    "20 2 * * *": "morning",    # 11:20 KST
+    "0 0 * * *": "morning",     # (구) 09:00 KST
+    "0 1 * * *": "morning",     # (구) 10:00 KST
+    # 오후 -> 항상 K열
+    "55 6 * * *": "afternoon",  # 15:55 KST
+    "25 7 * * *": "afternoon",  # 16:25 KST
+    "55 7 * * *": "afternoon",  # 16:55 KST
+    "25 8 * * *": "afternoon",  # 17:25 KST
+    "0 7 * * *": "afternoon",   # (구) 16:00 KST
 }
 
 

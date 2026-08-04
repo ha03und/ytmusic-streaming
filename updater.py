@@ -283,7 +283,8 @@ def read_one(cfg: dict) -> dict:
 # ※ update.yml 의 cron 을 바꾸면 여기도 같이 추가할 것.
 #   (없는 cron 이면 실행 시각으로 판별하는 예전 방식으로 돌아간다)
 CRON_SLOT = {
-    "0 0 * * *": "morning",     # 09:00 KST 예약 -> 항상 J열
+    "50 0 * * *": "morning",    # 09:50 KST 예약 -> 항상 J열
+    "0 0 * * *": "morning",     # (구) 09:00 KST 예약
     "0 1 * * *": "morning",     # (구) 10:00 KST 예약
     "55 6 * * *": "afternoon",  # 15:55 KST 예약 -> 항상 K열
     "0 7 * * *": "afternoon",   # (구) 16:00 KST 예약

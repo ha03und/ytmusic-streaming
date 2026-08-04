@@ -3,8 +3,14 @@ name: streaming-update
 on:
   schedule:
     # cron 은 UTC 기준. KST = UTC+9
-    - cron: "50 0 * * *"   # 매일 09:50 KST  -> 오전(J열)
-    - cron: "55 6 * * *"   # 매일 15:55 KST  -> 오후(K열)
+    - cron: "50 0 * * *"   # 09:50 KST -> 오전(J열)
+    - cron: "20 1 * * *"   # 10:20 KST -> 오전(J열)
+    - cron: "50 1 * * *"   # 10:50 KST -> 오전(J열)
+    - cron: "20 2 * * *"   # 11:20 KST -> 오전(J열)
+    - cron: "55 6 * * *"   # 15:55 KST -> 오후(K열)
+    - cron: "25 7 * * *"   # 16:25 KST -> 오후(K열)
+    - cron: "55 7 * * *"   # 16:55 KST -> 오후(K열)
+    - cron: "25 8 * * *"   # 17:25 KST -> 오후(K열)
   workflow_dispatch:        # 수동 실행 버튼
     inputs:
       slot:

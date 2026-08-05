@@ -40,7 +40,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import gspread
@@ -303,8 +303,8 @@ CRON_SLOT = {
 }
 
 
-def slot_from_schedule() -> str | None:
-    """GitHub Actions 예약 실행이면 어떤 cron 이 띄웠는지 보고 슬롯을 정한다."""
+def event_schedule() -> str | None:
+    """GitHub Actions 예약 실행이면 이 실행을 띄운 cron 문자열을 반환."""
     path = os.environ.get("GITHUB_EVENT_PATH")
     if not path or not os.path.exists(path):
         return None
@@ -313,11 +313,44 @@ def slot_from_schedule() -> str | None:
             sched = json.load(f).get("schedule")
     except Exception:  # noqa: BLE001
         return None
+    return sched.strip() if sched else None
+
+
+def slot_from_schedule() -> str | None:
+    """어느 예약에서 왔는지로 슬롯(오전/오후)을 정한다."""
+    sched = event_schedule()
     if not sched:
         return None
-    slot = CRON_SLOT.get(sched.strip())
+    slot = CRON_SLOT.get(sched)
     print(f"[info] 예약 cron='{sched}' -> slot={slot or '판별불가(시각으로 대체)'}")
     return slot
+
+
+def target_date_str() -> str:
+    """기입할 날짜(YYYYMMDD).
+
+    예약이 크게 지연되어 자정을 넘겨 실행되면, '실행된 날짜'로 행을 찾을 경우
+    엉뚱한 날짜에 값이 들어간다(예: 8/4 16:55 예약이 8/5 01:24 에 실행 → 8/5 에 기입).
+    그래서 예약 실행일 때는 cron 에 적힌 '원래 돌았어야 할 시각'을 기준으로 날짜를 정한다.
+    """
+    now = datetime.now(KST)
+    sched = event_schedule()
+    if sched:
+        try:
+            minute, hour = int(sched.split()[0]), int(sched.split()[1])
+            # cron 은 UTC 기준 -> KST 로 환산
+            due = (now.replace(hour=0, minute=0, second=0, microsecond=0)
+                   + timedelta(hours=hour + 9, minutes=minute))
+            if due > now:
+                # 오늘 예정 시각이 아직 안 왔다 = 어제 예약이 밀려서 지금 돈 것
+                due -= timedelta(days=1)
+            if due.date() != now.date():
+                print(f"[info] 예약 지연 감지: 원래 {due:%Y-%m-%d %H:%M} KST 예정 "
+                      f"-> {due:%Y%m%d} 행에 기입")
+            return due.strftime("%Y%m%d")
+        except (ValueError, IndexError):
+            pass
+    return now.strftime("%Y%m%d")
 
 
 def resolve_slot(slot: str) -> tuple[str, int]:
@@ -337,7 +370,7 @@ def main():
 
     slot, col = resolve_slot(args.slot)
     cl = col_letter(col)
-    date_str = datetime.now(KST).strftime("%Y%m%d")
+    date_str = target_date_str()
     print(f"== {date_str} / {slot} (열={cl}) / round={'만' if ROUND_TO_MAN else 'raw'} / "
           f"dry_run={args.dry_run} ==")
 

@@ -222,7 +222,7 @@ def find_song(cfg: dict) -> dict | None:
         title = r.get("title", "")
         if "inst" in norm(title) and "inst" not in (want_title or ""):
             continue  # (Inst.) 버전 제외
-        if not r.get("videoId") or not _artist_ok(artists, wants):
+        if r.get("resultType") != "song" or not _artist_ok(artists, wants):
             continue
         if fallback is None:
             fallback = r  # 아티스트만 맞는 첫 곡
@@ -249,7 +249,7 @@ def read_dream(cfg: dict) -> dict:
     wants = artist_aliases(cfg)
     main_item = note_item = None
     for r in results:
-        if not r.get("videoId") or not _title_ok(r.get("title", ""), want_title):
+        if r.get("resultType") != "song" or not _title_ok(r.get("title", ""), want_title):
             continue
         if not _artist_ok(" ".join(a["name"] for a in r.get("artists", [])), wants):
             continue

@@ -213,7 +213,7 @@ def _artist_ok(artists: str, wants: list[str]) -> bool:
 
 def find_song(cfg: dict) -> dict | None:
     """검색 결과에서 아티스트(+제목)가 일치하는 첫 곡을 반환."""
-    results = retry(get_yt().search, cfg["query"], filter="songs")
+    results = retry(get_yt().search, cfg["query"])
     wants = artist_aliases(cfg)
     want_title = norm(cfg.get("title", "")) or None
     fallback = None
@@ -222,7 +222,7 @@ def find_song(cfg: dict) -> dict | None:
         title = r.get("title", "")
         if "inst" in norm(title) and "inst" not in (want_title or ""):
             continue  # (Inst.) 버전 제외
-        if not _artist_ok(artists, wants):
+        if not r.get("videoId") or not _artist_ok(artists, wants):
             continue
         if fallback is None:
             fallback = r  # 아티스트만 맞는 첫 곡
@@ -242,14 +242,14 @@ def read_normal(cfg: dict) -> dict:
 def read_dream(cfg: dict) -> dict:
     """태연 '꿈' 두 버전을 앨범명으로 구분: 메인=셀값, part.3 ver=메모.
     두 버전이 같은 재생수로 표시될 수 있음(정상)."""
-    results = retry(get_yt().search, cfg["query"], filter="songs")
+    results = retry(get_yt().search, cfg["query"])
     main_kw = norm(cfg["main_album_contains"])
     note_kw = norm(cfg["note_album_contains"])
     want_title = norm(cfg["title"])
     wants = artist_aliases(cfg)
     main_item = note_item = None
     for r in results:
-        if not _title_ok(r.get("title", ""), want_title):
+        if not r.get("videoId") or not _title_ok(r.get("title", ""), want_title):
             continue
         if not _artist_ok(" ".join(a["name"] for a in r.get("artists", [])), wants):
             continue

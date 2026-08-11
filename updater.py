@@ -248,6 +248,7 @@ def read_dream(cfg: dict) -> dict:
     """태연 '꿈' 두 버전을 앨범명으로 구분: 메인=셀값, part.3 ver=메모.
     두 버전이 같은 재생수로 표시될 수 있음(정상)."""
     results = retry(get_yt().search, cfg["query"])
+    print("[DREAM]", [(x.get("resultType"), (x.get("album") or {}).get("name"), x.get("views"), x.get("title")) for x in results][:12])
     main_kw = norm(cfg["main_album_contains"])
     note_kw = norm(cfg["note_album_contains"])
     want_title = norm(cfg["title"])

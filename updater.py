@@ -214,12 +214,14 @@ def _artist_ok(artists: str, wants: list[str]) -> bool:
 def find_song(cfg: dict) -> dict | None:
     """검색 결과에서 아티스트(+제목)가 일치하는 첫 곡을 반환."""
     results = retry(get_yt().search, cfg["query"])
-    print("[DBG]", cfg.get("worksheet"), [(x.get("videoId"), x.get("views"), x.get("resultType")) for x in results][:8])
     wants = artist_aliases(cfg)
     want_title = norm(cfg.get("title", "")) or None
+    if cfg.get("video_id"):
+        for r in results:
+            if r.get("videoId") == cfg["video_id"]:
+                return r
     fallback = None
     for r in results:
-        if cfg.get("video_id") and r.get("videoId") == cfg["video_id"]: return r
         artists = " ".join(a["name"] for a in r.get("artists", []))
         title = r.get("title", "")
         if "inst" in norm(title) and "inst" not in (want_title or ""):

@@ -216,6 +216,8 @@ def find_song(cfg: dict) -> dict | None:
     results = retry(get_yt().search, cfg["query"])
     wants = artist_aliases(cfg)
     want_title = norm(cfg.get("title", "")) or None
+    if cfg.get("video_id"):
+        return {"videoId": cfg["video_id"]}
     fallback = None
     for r in results:
         artists = " ".join(a["name"] for a in r.get("artists", []))
@@ -247,6 +249,10 @@ def read_dream(cfg: dict) -> dict:
     note_kw = norm(cfg["note_album_contains"])
     want_title = norm(cfg["title"])
     wants = artist_aliases(cfg)
+    if cfg.get("main_video_id") and cfg.get("note_video_id"):
+        mv = get_view_count(cfg["main_video_id"])
+        nv = get_view_count(cfg["note_video_id"])
+        return {"value": format_count(mv), "raw": mv, "note": f"part.3 ver {to_man(nv)}만회"}
     main_item = note_item = None
     for r in results:
         if r.get("resultType") != "song" or not _title_ok(r.get("title", ""), want_title):

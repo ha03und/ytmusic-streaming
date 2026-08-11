@@ -252,10 +252,6 @@ def read_dream(cfg: dict) -> dict:
     note_kw = norm(cfg["note_album_contains"])
     want_title = norm(cfg["title"])
     wants = artist_aliases(cfg)
-    if cfg.get("main_video_id") and cfg.get("note_video_id"):
-        mv = get_view_count(cfg["main_video_id"])
-        nv = get_view_count(cfg["note_video_id"])
-        return {"value": format_count(mv), "raw": mv, "note": f"part.3 ver {to_man(nv)}만회"}
     main_item = note_item = None
     for r in results:
         if r.get("resultType") != "song" or not _title_ok(r.get("title", ""), want_title):
@@ -267,14 +263,20 @@ def read_dream(cfg: dict) -> dict:
             main_item = r
         elif note_kw in album and not note_item:
             note_item = r
-    if not main_item or not note_item:
-        raise RuntimeError("꿈 두 버전(메인/part.3 ver)을 모두 찾지 못함 - songs.yaml 앨범 키워드 확인")
-    main_views = views_of(main_item)
-    note_views = views_of(note_item)
+    # 검색 카드(재생수)를 우선 사용: 앨범명으로 Part.3 / SPECIAL 두 버전 구분
+    if main_item and note_item:
+        main_views = views_of(main_item)
+        note_views = views_of(note_item)
+    elif cfg.get("main_video_id") and cfg.get("note_video_id"):
+        # 검색이 실패할 때만 지정 영상 조회수로 대체
+        main_views = get_view_count(cfg["main_video_id"])
+        note_views = get_view_count(cfg["note_video_id"])
+    else:
+        raise RuntimeError("꿈 두 버전(메인/SPECIAL)을 모두 찾지 못함 - songs.yaml 앨범 키워드 확인")
     return {
         "value": format_count(main_views),
         "raw": main_views,
-        "note": f"part.3 ver {to_man(note_views)}만회",
+        "note": f"SPECIAL ver {to_man(note_views)}만회",
     }
 
 

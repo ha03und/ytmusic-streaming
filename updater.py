@@ -248,36 +248,35 @@ def read_dream(cfg: dict) -> dict:
     """태연 '꿈' 두 버전을 앨범명으로 구분: 메인=셀값, part.3 ver=메모.
     두 버전이 같은 재생수로 표시될 수 있음(정상)."""
     results = retry(get_yt().search, cfg["query"])
-    print("[DREAM]", [(x.get("resultType"), (x.get("album") or {}).get("name"), x.get("views"), x.get("title")) for x in results][:12])
-    main_kw = norm(cfg["main_album_contains"])
-    note_kw = norm(cfg["note_album_contains"])
     want_title = norm(cfg["title"])
     wants = artist_aliases(cfg)
-    main_item = note_item = None
+    # '꿈'은 검색결과의 album 필드가 비어 있어 앨범명으로 버전 구분이 안 된다.
+    # 대신 정확히 '꿈' 제목 + 태연 곡의 재생수 카드를 모아 가장 큰 값을 사용한다.
+    # (노출 카드가 Part.3=5084만 / SPECIAL=5082만으로 사실상 동일)
+    cards = []
     for r in results:
-        if r.get("resultType") != "song" or not _title_ok(r.get("title", ""), want_title):
+        if r.get("resultType") != "song":
             continue
+        if norm(r.get("title", "")) != want_title:
+            continue  # (Inst.) / Illusion 등 제외, 정확히 '꿈'만
         if not _artist_ok(" ".join(a["name"] for a in r.get("artists", [])), wants):
             continue
-        album = norm((r.get("album") or {}).get("name", ""))
-        if main_kw in album and not main_item:
-            main_item = r
-        elif note_kw in album and not note_item:
-            note_item = r
-    # 검색 카드(재생수)를 우선 사용: 앨범명으로 Part.3 / SPECIAL 두 버전 구분
-    if main_item and note_item:
-        main_views = views_of(main_item)
-        note_views = views_of(note_item)
+        v = parse_ko_views(r.get("views"))
+        if v:
+            cards.append(v)
+    if cards:
+        cards.sort(reverse=True)
+        main_views = cards[0]
+        note_views = cards[1] if len(cards) >= 2 else cards[0]
     elif cfg.get("main_video_id") and cfg.get("note_video_id"):
-        # 검색이 실패할 때만 지정 영상 조회수로 대체
         main_views = get_view_count(cfg["main_video_id"])
         note_views = get_view_count(cfg["note_video_id"])
     else:
-        raise RuntimeError("꿈 두 버전(메인/SPECIAL)을 모두 찾지 못함 - songs.yaml 앨범 키워드 확인")
+        raise RuntimeError("꿈 재생수 카드를 찾지 못함 - 검색 결과 확인")
     return {
         "value": format_count(main_views),
         "raw": main_views,
-        "note": f"SPECIAL ver {to_man(note_views)}만회",
+        "note": f"다른 버전 {to_man(note_views)}만회",
     }
 
 
@@ -452,8 +451,8 @@ def main():
                 except ValueError:
                     prev = None
                 break
-        if prev is not None and d["value"] < prev:
-            print(f"[주의] {ws}: 직전값({prev:,})보다 작음 → 곡 매칭 확인 권장")
+        if prev is not None and d["value"] < prev * 0.97:
+            print(f"[주의] {ws}: 직전값({prev:,})보다 크게 작음 → 곡 매칭 확인 권장(건너뜀)")
             continue
 
         a1 = f"{cl}{row}"

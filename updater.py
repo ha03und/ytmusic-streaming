@@ -234,7 +234,7 @@ def find_song(cfg: dict) -> dict | None:
             return r
     return fallback
 
-_SCALE = {"10CM": 1.14498, "우디 - 이 사랑": 1.06598, "한 걸음씩": 1.02662, "fadeaway": 1.16999, "럽미백": 1.17603, "도유카 - Around": 1.16582}
+_SCALE = {"10CM": 1.14498, "우디 - 이 사랑": 1.06598, "한 걸음씩": 1.02662, "fadeaway": 1.16999, "럽미백": 1.17603, "도유카 - Around": 1.16582, "보넥도-이렇게": 1.1615}
 def read_normal(cfg: dict) -> dict:
     song = find_song(cfg)
     if not song:

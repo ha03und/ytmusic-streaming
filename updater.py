@@ -216,8 +216,6 @@ def find_song(cfg: dict) -> dict | None:
     results = retry(get_yt().search, cfg["query"])
     wants = artist_aliases(cfg)
     want_title = norm(cfg.get("title", "")) or None
-    if cfg.get("video_id"):
-        return {"videoId": cfg["video_id"]}
     fallback = None
     for r in results:
         artists = " ".join(a["name"] for a in r.get("artists", []))

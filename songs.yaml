@@ -11,87 +11,94 @@
 
 songs:
   - worksheet: "경서 - 슈퍼스타"
+    video_id: "7bBtEEVCeHE"
     query: "경서 슈퍼스타"
     artist: "경서"
     title: "슈퍼스타"
 
   - worksheet: "파테코 - Rainy day"
+    video_id: "7DnwSeOsejE"
     query: "Rainy day 파테코"
     artist: ["PATEKO", "파테코"]
     title: "Rainy day (feat. ASH ISLAND, Skinny Brown)"
 
   - worksheet: "탑현 - 바다의 왕자"
+    video_id: "CkuQvUdpkog"
     query: "바다의 왕자 탑현"
     artist: "탑현"
     title: "바다의 왕자"
 
-  # 2026-07-29: 피프티(Oops, My Bad) 제외 → 도유카 - Around 추가
-  # title 은 앨범명이 붙어 나오는 경우가 있어 생략(아티스트로만 매칭)
   - worksheet: "도유카 - Around"
+    video_id: "T5MC_nHkF6E"
     query: "around 도유카"
     artist: "도유카"
 
   - worksheet: "한 걸음씩"
+    video_id: "b4c9_nDLzI0"
     query: "#안녕 한 걸음씩 멀어지는 너에게"
     artist: "#안녕"
     title: "한 걸음씩 멀어지는 너에게"
 
   - worksheet: "우디 - 이 사랑"
+    video_id: "s4TTlcrkMPU"
     query: "이 사랑 우디"
     artist: ["우디", "Woody"]
     title: "이 사랑"
 
   - worksheet: "치즈-이렇게"
+    video_id: "eO5xa4ThtU4"
     query: "이렇게 좋아해본 적이 없어요 치즈"
     artist: ["CHEEZE", "치즈"]
     title: "이렇게 좋아해 본 적이 없어요"
 
   - worksheet: "보넥도-이렇게"
+    video_id: "NeFNFHF1Fzc"
     query: "이렇게 좋아해본 적이 없어요 BOYNEXTDOOR"
     artist: ["BOYNEXTDOOR", "보이넥스트도어"]
     title: "이렇게 좋아해 본 적이 없어요"
 
   - worksheet: "fadeaway"
+    video_id: "I6StVU3kABM"
     query: "fadeaway BOYNEXTDOOR"
     artist: ["BOYNEXTDOOR", "보이넥스트도어"]
     title: "Fadeaway"
 
-  # 검색어는 "럽미백" 한 단어로 충분 (유튜브뮤직에서 바로 뜸)
-  # 한국어 조회 시 아티스트가 "프로미스나인" 으로 오므로 두 표기 모두 등록
   - worksheet: "럽미백"
+    video_id: "EE8655GDT9k"
     query: "럽미백"
     artist: ["프로미스나인", "fromis_9"]
     title: "Love Me Back"
 
   - worksheet: "10CM"
+    video_id: "tnsggn5cNmU"
     query: "서랍 10CM"
     artist: "10CM"
     title: "서랍"
 
   - worksheet: "샘김"
+    video_id: "vELDb7Kot5s"
     query: "여름비 샘김"
     artist: ["샘김", "Sam Kim"]
     title: "여름비"
 
   - worksheet: "이별후회"
+    video_id: "vnEuD5BgnZg"
     query: "이별후회 김나영"
     artist: "김나영"
     title: "이별후회"
 
-  # 특수곡: 태연 '꿈' — 두 버전이 검색됨
-  #  * 셀 값  = 메인(OST Part.3 싱글) 재생수
-  #  * 셀 메모 = "part.3 ver ○○만회" (웰컴투 삼달리 OST SPECIAL 버전)
   - worksheet: "꿈"
+    mode: "dream"
+    main_video_id: "no-5Lld9PiU"
+    note_video_id: "bOlsEDDyeM8"
     query: "꿈 태연"
     artist: "태연"
     title: "꿈"
-    mode: "dream"
-    main_album_contains: "Part.3"      # 메인(셀 값)으로 쓸 앨범 키워드
-    note_album_contains: "SPECIAL"     # 메모로 쓸 part.3 ver 앨범 키워드
+    main_album_contains: "Part.3"
+    note_album_contains: "SPECIAL"
 
-  # V(뷔) — 셀 값만 입력. 메모는 별도 스크립트가 관리하므로 절대 건드리지 않음
-  # (updater.py 는 값 셀만 update 하므로 기존 메모는 그대로 유지됨)
   - worksheet: "V"
+    video_id: "l29XdcD2gTo"
     query: "Christmas Tree V (뷔)"
     artist: ["뷔", "V"]
     title: "Christmas Tree"

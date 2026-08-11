@@ -213,7 +213,7 @@ def _artist_ok(artists: str, wants: list[str]) -> bool:
 
 def find_song(cfg: dict) -> dict | None:
     """검색 결과에서 아티스트(+제목)가 일치하는 첫 곡을 반환."""
-    results = retry(get_yt().search, cfg["query"])
+    results = retry(get_yt().search, cfg["query"], filter="songs")
     wants = artist_aliases(cfg)
     want_title = norm(cfg.get("title", "")) or None
     fallback = None
@@ -242,7 +242,7 @@ def read_normal(cfg: dict) -> dict:
 def read_dream(cfg: dict) -> dict:
     """태연 '꿈' 두 버전을 앨범명으로 구분: 메인=셀값, part.3 ver=메모.
     두 버전이 같은 재생수로 표시될 수 있음(정상)."""
-    results = retry(get_yt().search, cfg["query"])
+    results = retry(get_yt().search, cfg["query"], filter="songs")
     main_kw = norm(cfg["main_album_contains"])
     note_kw = norm(cfg["note_album_contains"])
     want_title = norm(cfg["title"])

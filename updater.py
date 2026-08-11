@@ -218,6 +218,7 @@ def find_song(cfg: dict) -> dict | None:
     want_title = norm(cfg.get("title", "")) or None
     fallback = None
     for r in results:
+        if cfg.get("video_id") and r.get("videoId") == cfg["video_id"]: return r
         artists = " ".join(a["name"] for a in r.get("artists", []))
         title = r.get("title", "")
         if "inst" in norm(title) and "inst" not in (want_title or ""):

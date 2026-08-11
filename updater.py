@@ -446,6 +446,7 @@ def main():
                 break
         if prev is not None and d["value"] < prev:
             print(f"[주의] {ws}: 직전값({prev:,})보다 작음 → 곡 매칭 확인 권장")
+            continue
 
         a1 = f"{cl}{row}"
         updates.append({"range": f"'{ws}'!{a1}", "values": [[d["value"]]]})

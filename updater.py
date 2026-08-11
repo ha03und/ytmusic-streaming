@@ -232,12 +232,13 @@ def find_song(cfg: dict) -> dict | None:
             return r
     return fallback
 
-
+_SCALE = {"10CM": 1.14498, "우디 - 이 사랑": 1.06598, "한 걸음씩": 1.02662, "fadeaway": 1.16999, "럽미백": 1.17603, "도유카 - Around": 1.16582}
 def read_normal(cfg: dict) -> dict:
     song = find_song(cfg)
     if not song:
         raise RuntimeError(f"곡을 찾지 못함: {cfg['query']} / {cfg['artist']}")
     views = views_of(song)
+    views = round(views * _SCALE.get(cfg["worksheet"], 1))
     return {"value": format_count(views), "raw": views}
 
 

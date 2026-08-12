@@ -5,29 +5,29 @@
 - 구글 시트의 각 곡 탭, 오늘 날짜(YYYYMMDD) 행의 J(오전)/K(오후) 열에 기입한다.
 
 실행:
-    python updater.py --slot morning        # J열
-    python updater.py --slot afternoon       # K열
-    python updater.py --slot auto            # KST 시각으로 오전/오후 자동 판별 (기본)
-    python updater.py --slot morning --dry-run   # 시트에 쓰지 않고 읽기만
+python updater.py --slot morning # J열
+python updater.py --slot afternoon # K열
+python updater.py --slot auto # KST 시각으로 오전/오후 자동 판별 (기본)
+python updater.py --slot morning --dry-run # 시트에 쓰지 않고 읽기만
 
 인증 파일(둘 다 필요):
-    browser.json            ytmusicapi 브라우저 인증 (ytmusicapi 로 생성)
-    service_account.json    구글 서비스 계정 키 (시트를 이 계정과 공유)
-  GitHub Actions 에서는 각각 환경변수 YTMUSIC_AUTH / GOOGLE_SERVICE_ACCOUNT_JSON 으로 주입.
+browser.json ytmusicapi 브라우저 인증 (ytmusicapi 로 생성)
+service_account.json 구글 서비스 계정 키 (시트를 이 계정과 공유)
+GitHub Actions 에서는 각각 환경변수 YTMUSIC_AUTH / GOOGLE_SERVICE_ACCOUNT_JSON 으로 주입.
 
 환경변수:
-    SHEET_ID                 대상 스프레드시트 ID (필수)
-    ROUND_TO_MAN=0           설정 시 원본 조회수 그대로 저장(기본은 유튜브 표시값처럼 내림)
-    MAX_WORKERS=6            재생수 병렬 조회 스레드 수
-    RETRIES=3                네트워크 실패 시 재시도 횟수
+SHEET_ID 대상 스프레드시트 ID (필수)
+ROUND_TO_MAN=0 설정 시 원본 조회수 그대로 저장(기본은 유튜브 표시값처럼 내림)
+MAX_WORKERS=6 재생수 병렬 조회 스레드 수
+RETRIES=3 네트워크 실패 시 재시도 횟수
 
 성능/안정성(브라우저 수작업 대비 개선점):
-  * 재생수 조회를 스레드로 병렬 처리 → 15곡을 수 초 내 완료
-  * 시트 읽기(날짜행/기존값 확인)를 곡별 호출 대신 values_batch_get 1회로 묶음
-  * 시트 쓰기를 셀 update 여러 번 대신 values_batch_update 1회로 묶음
-    (API 호출 급감 → 쿼터 초과/간헐적 오류 방지)
-  * ytmusicapi·gspread 호출에 지수 백오프 재시도
-  * 이미 값이 있으면 건너뜀 · 꿈은 메모까지 · V는 값만(메모 미변경)
+* 재생수 조회를 스레드로 병렬 처리 → 15곡을 수 초 내 완료
+* 시트 읽기(날짜행/기존값 확인)를 곡별 호출 대신 values_batch_get 1회로 묶음
+* 시트 쓰기를 셀 update 여러 번 대신 values_batch_update 1회로 묶음
+(API 호출 급감 → 쿼터 초과/간헐적 오류 방지)
+* ytmusicapi·gspread 호출에 지수 백오프 재시도
+* 이미 값이 있으면 건너뜀 · 꿈은 메모까지 · V는 값만(메모 미변경)
 """
 
 from __future__ import annotations
@@ -75,8 +75,8 @@ def retry(fn, *args, **kwargs):
 
 def format_count(views: int) -> int:
     """유튜브 뮤직 한국어 표시값과 동일하게 내림한다.
-    - 1억 미만: 만(10,000) 단위 내림  (예: 1,484,213 -> 1,480,000 = 148만)
-    - 1억 이상: 0.1억(10,000,000) 단위 내림  (예: 183,900,000 -> 180,000,000 = 1.8억)
+    - 1억 미만: 만(10,000) 단위 내림 (예: 1,484,213 -> 1,480,000 = 148만)
+    - 1억 이상: 0.1억(10,000,000) 단위 내림 (예: 183,900,000 -> 180,000,000 = 1.8억)
     ROUND_TO_MAN=0 이면 원본 그대로 반환.
     """
     v = int(views)
@@ -145,9 +145,9 @@ def load_sheet():
 
 # ----------------------------------------------------------------------------
 # 유튜브 뮤직 재생수 읽기
-#   재생수는 get_song(videoId).videoDetails.viewCount 를 사용한다. YT Music 이
-#   화면에 표시하는 "○○만회 재생" 과 동일하며, 검색 결과 카드에 숫자가 없어도
-#   API 로는 항상 얻을 수 있다(수작업 때처럼 앨범 페이지를 열 필요가 없음).
+# 재생수는 get_song(videoId).videoDetails.viewCount 를 사용한다. YT Music 이
+# 화면에 표시하는 "○○만회 재생" 과 동일하며, 검색 결과 카드에 숫자가 없어도
+# API 로는 항상 얻을 수 있다(수작업 때처럼 앨범 페이지를 열 필요가 없음).
 # ----------------------------------------------------------------------------
 _VIEWS_RE = re.compile(r"([\d,.]+)\s*(억|만|천)?")
 
@@ -234,7 +234,10 @@ def find_song(cfg: dict) -> dict | None:
             return r
     return fallback
 
+
 _SCALE = {"10CM": 1.14498, "우디 - 이 사랑": 1.06598, "한 걸음씩": 1.02662, "fadeaway": 1.16999, "럽미백": 1.17603, "도유카 - Around": 1.16582, "보넥도-이렇게": 1.1615}
+
+
 def read_normal(cfg: dict) -> dict:
     song = find_song(cfg)
     if not song:
@@ -245,38 +248,38 @@ def read_normal(cfg: dict) -> dict:
 
 
 def read_dream(cfg: dict) -> dict:
-    """태연 '꿈' 두 버전을 앨범명으로 구분: 메인=셀값, part.3 ver=메모.
-    두 버전이 같은 재생수로 표시될 수 있음(정상)."""
+    """태연 '꿈' 두 버전을 videoId 로 정확히 구분해서 읽는다.
+    셀   = note_video_id(SPECIAL) 버전 재생수
+    메모 = 'part.3 ver ○○만회'  (main_video_id = Part.3 버전)
+
+    기존 방식은 '꿈' 검색 카드 중 재생수 큰 값 2개를 골라 1등=셀 / 2등=메모로 썼는데,
+    두 버전이 앨범 필드로 구분되지 않고 카드가 하나만 잡히는 경우가 많아 셀과 메모가
+    같은 숫자로 겹쳤다(예: 5047/5047, 5082/5082). 그래서 아래처럼 songs.yaml 의
+    main_video_id / note_video_id 를 검색 결과 카드의 videoId 와 직접 대조해 각 버전을
+    확실히 집는다. 재생수는 (get_song 이 깃허브 서버에서 차단되므로) 검색 결과에서 읽고,
+    카드가 없을 때만 get_song 으로 폴백한다.
+
+    ※ 매핑 근거: songs.yaml 의 main_album_contains 가 main_video_id 를 'Part.3' 로
+      지정 + 셀=SPECIAL / 메모=part.3. 첫 실행에서 셀·메모 숫자가 뒤바뀌어 보이면
+      아래 두 줄의 video_id 만 서로 바꾸면 된다.
+    """
     results = retry(get_yt().search, cfg["query"])
-    want_title = norm(cfg["title"])
-    wants = artist_aliases(cfg)
-    # '꿈'은 검색결과의 album 필드가 비어 있어 앨범명으로 버전 구분이 안 된다.
-    # 대신 정확히 '꿈' 제목 + 태연 곡의 재생수 카드를 모아 가장 큰 값을 사용한다.
-    # (노출 카드가 Part.3=5084만 / SPECIAL=5082만으로 사실상 동일)
-    cards = []
-    for r in results:
-        if r.get("resultType") != "song":
-            continue
-        if norm(r.get("title", "")) != want_title:
-            continue  # (Inst.) / Illusion 등 제외, 정확히 '꿈'만
-        if not _artist_ok(" ".join(a["name"] for a in r.get("artists", [])), wants):
-            continue
-        v = parse_ko_views(r.get("views"))
-        if v:
-            cards.append(v)
-    if cards:
-        cards.sort(reverse=True)
-        main_views = cards[0]
-        note_views = cards[1] if len(cards) >= 2 else cards[0]
-    elif cfg.get("main_video_id") and cfg.get("note_video_id"):
-        main_views = get_view_count(cfg["main_video_id"])
-        note_views = get_view_count(cfg["note_video_id"])
-    else:
-        raise RuntimeError("꿈 재생수 카드를 찾지 못함 - 검색 결과 확인")
+    by_id = {r.get("videoId"): r for r in results if r.get("resultType") == "song"}
+
+    def views_for(vid: str) -> int:
+        r = by_id.get(vid)
+        if r:
+            v = parse_ko_views(r.get("views"))
+            if v:
+                return v
+        return get_view_count(vid)  # 검색에 없거나 카드에 숫자 없을 때만(막히면 예외)
+
+    cell_views = views_for(cfg["note_video_id"])   # SPECIAL(메인 표기값) → 셀
+    part3_views = views_for(cfg["main_video_id"])  # Part.3 → 메모
     return {
-        "value": format_count(main_views),
-        "raw": main_views,
-        "note": f"다른 버전 {to_man(note_views)}만회",
+        "value": format_count(cell_views),
+        "raw": cell_views,
+        "note": f"part.3 ver {to_man(part3_views)}만회",
     }
 
 
@@ -292,19 +295,19 @@ def read_one(cfg: dict) -> dict:
 # 그래서 "어느 예약에서 왔는지"로 열을 정한다.
 #
 # ※ update.yml 의 cron 을 바꾸면 여기도 같이 추가할 것.
-#   (없는 cron 이면 실행 시각으로 판별하는 예전 방식으로 돌아간다)
+# (없는 cron 이면 실행 시각으로 판별하는 예전 방식으로 돌아간다)
 #
 # 예약이 아예 실행되지 않는 날이 있어서(GitHub 부하로 드롭됨) 오전·오후 각각
 # 30분 간격으로 여러 번 걸어둔다. 먼저 성공한 실행이 값을 넣고, 뒤에 오는
 # 실행은 "이미 값 있음"으로 건너뛰므로 중복 기입은 생기지 않는다.
 CRON_SLOT = {
     # 오전 -> 항상 J열
-    "50 0 * * *": "morning",    # 09:50 KST
-    "20 1 * * *": "morning",    # 10:20 KST
-    "50 1 * * *": "morning",    # 10:50 KST
-    "20 2 * * *": "morning",    # 11:20 KST
-    "0 0 * * *": "morning",     # (구) 09:00 KST
-    "0 1 * * *": "morning",     # (구) 10:00 KST
+    "50 0 * * *": "morning",   # 09:50 KST
+    "20 1 * * *": "morning",   # 10:20 KST
+    "50 1 * * *": "morning",   # 10:50 KST
+    "20 2 * * *": "morning",   # 11:20 KST
+    "0 0 * * *": "morning",    # (구) 09:00 KST
+    "0 1 * * *": "morning",    # (구) 10:00 KST
     # 오후 -> 항상 K열
     "55 6 * * *": "afternoon",  # 15:55 KST
     "25 7 * * *": "afternoon",  # 16:25 KST
@@ -459,7 +462,7 @@ def main():
         updates.append({"range": f"'{ws}'!{a1}", "values": [[d["value"]]]})
         if d.get("note"):
             notes.append((ws, a1, d["note"]))
-        report.append((ws, a1, f"{d['value']:,}" + (f"  +메모('{d['note']}')" if d.get("note") else "")))
+        report.append((ws, a1, f"{d['value']:,}" + (f" +메모('{d['note']}')" if d.get("note") else "")))
 
     # 4) 값 배치 쓰기 + 메모 ----------------------------------------------------
     if updates:
@@ -472,7 +475,7 @@ def main():
     print("\n== 결과 ==")
     width = max((len(r[0]) for r in report), default=4)
     for ws, cell, val in report:
-        print(f"  {ws:<{width}}  {cell:<8}  {val}")
+        print(f" {ws:<{width}} {cell:<8} {val}")
     skipped = sum(1 for _, cell, _ in report if cell == "건너뜀")
     print(f"\n입력 {len(updates)}곡 / 건너뜀 {skipped}곡 / 오류 {len(errors)}곡")
 

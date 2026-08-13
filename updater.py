@@ -113,8 +113,11 @@ def ensure_auth_file() -> str | None:
         with open(_AUTH_PATH, "w", encoding="utf-8") as f:
             f.write(os.environ["YTMUSIC_AUTH"])
     if not os.path.exists(_AUTH_PATH):
-        print("[info] browser.json 없음 → 비로그인 모드로 조회합니다.")
+        print("[info] browser.json 없음 → 비로그인 모드로 조회합니다. "
+              "(검색에 재생수가 안 붙는 곡은 실패할 수 있음. "
+              "GitHub Secrets 에 YTMUSIC_AUTH 를 등록하면 로그인 모드로 동작)")
         return None
+    print("[info] YTMUSIC_AUTH 확인 → 로그인 모드로 조회합니다.")
     return _AUTH_PATH
 
 
@@ -287,6 +290,30 @@ def read_one(cfg: dict) -> dict:
     return read_dream(cfg) if cfg.get("mode") == "dream" else read_normal(cfg)
 
 
+# 검색 결과에 재생수가 "그때만" 안 붙어 오는 일이 잦다. 그러면 막혀 있는
+# get_song 폴백으로 넘어가 LOGIN_REQUIRED 로 실패한다(2026-08-13 오전 7곡 실패).
+# 유튜브뮤직에는 값이 멀쩡히 있는데 조회 시점에만 안 잡히는 것이라,
+# 잠깐 쉬었다가 다시 검색하면 대체로 붙어 온다. 그래서 곡 단위로 재시도한다.
+READ_ATTEMPTS = int(os.environ.get("READ_ATTEMPTS", "4"))
+READ_RETRY_DELAY = float(os.environ.get("READ_RETRY_DELAY", "2.0"))
+
+
+def read_one_safe(cfg: dict) -> dict:
+    """read_one 을 재시도. 실패하면 대기시간을 늘려가며 다시 검색한다."""
+    last = None
+    for i in range(READ_ATTEMPTS):
+        try:
+            d = read_one(cfg)
+            if i:
+                print(f"[재시도 성공] {cfg['worksheet']}: {i + 1}번째 시도에서 읽음")
+            return d
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if i < READ_ATTEMPTS - 1:
+                time.sleep(READ_RETRY_DELAY * (i + 1))
+    raise last
+
+
 # ----------------------------------------------------------------------------
 # 메인
 # ----------------------------------------------------------------------------
@@ -397,7 +424,7 @@ def main():
     data_by_idx: dict[int, dict] = {}
     errors: list[tuple[str, str]] = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futs = {ex.submit(read_one, s): i for i, s in enumerate(songs)}
+        futs = {ex.submit(read_one_safe, s): i for i, s in enumerate(songs)}
         for fut, i in futs.items():
             name = songs[i]["worksheet"]
             try:

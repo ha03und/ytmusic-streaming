@@ -172,12 +172,12 @@ def parse_ko_views(text: str) -> int | None:
     return int(round(num * mult))
 
 
-def views_of(item: dict) -> int:
-    """검색 결과 항목의 재생수. 검색에 없으면 player(get_song)로 폴백."""
-    v = parse_ko_views(item.get("views"))
-    if v:
-        return v
-    song = retry(get_yt().get_song, item["videoId"])
+def player_views(video_id: str) -> int:
+    """get_song(player) 로 재생수를 읽는다. 검색 카드에 숫자가 없을 때의 폴백.
+
+    (예전엔 views_of 폴백과 get_view_count 두 곳에 같은 코드가 나뉘어 있었다.)
+    """
+    song = retry(get_yt().get_song, video_id)
     details = song.get("videoDetails") or {}
     if "viewCount" not in details:
         status = (song.get("playabilityStatus") or {}).get("status")
@@ -185,9 +185,9 @@ def views_of(item: dict) -> int:
     return int(details["viewCount"])
 
 
-def get_view_count(video_id: str) -> int:
-    song = retry(get_yt().get_song, video_id)
-    return int(song["videoDetails"]["viewCount"])
+def views_of(item: dict) -> int:
+    """검색 결과 항목의 재생수. 검색에 없으면 player(get_song)로 폴백."""
+    return parse_ko_views(item.get("views")) or player_views(item["videoId"])
 
 
 def _title_ok(title: str, want_title: str | None) -> bool:
@@ -214,40 +214,94 @@ def _artist_ok(artists: str, wants: list[str]) -> bool:
     return any(w in a for w in wants)
 
 
+# 유튜브뮤직 화면에서 '노래' 탭을 누르면 안 보이던 재생수가 보인다. 검색 API도
+# filter="songs" 를 주면 같은 효과라, 재생수가 카드에 붙어 와서 get_song 폴백
+# (=깃허브에서 LOGIN_REQUIRED 로 막힘)을 안 타게 된다.
+# 2026-08-11 에 한 번 시도했다가 "비로그인이라 깨짐"으로 되돌렸는데, 지금은
+# YTMUSIC_AUTH 가 등록돼 로그인 모드라 다시 쓸 수 있다.
+# 문제가 생기면 SONGS_FILTER=0 으로 끄면 예전(일반 검색)으로 돌아간다.
+USE_SONGS_FILTER = os.environ.get("SONGS_FILTER", "1") != "0"
+
+
+def _search_songs(cfg: dict) -> list:
+    """'노래' 필터로 검색하고, 막히거나 비면 일반 검색으로 폴백."""
+    if USE_SONGS_FILTER:
+        try:
+            r = retry(get_yt().search, cfg["query"], filter="songs")
+            if r:
+                return r
+            print(f"[info] {cfg['worksheet']}: filter=songs 결과 없음 → 일반 검색")
+        except Exception as e:  # noqa: BLE001
+            print(f"[info] {cfg['worksheet']}: filter=songs 실패({e}) → 일반 검색")
+    return retry(get_yt().search, cfg["query"])
+
+
+def _is_song(r: dict) -> bool:
+    """filter='songs' 결과는 resultType 이 없을 수 있어 함께 허용."""
+    return r.get("resultType") in (None, "song")
+
+
 def find_song(cfg: dict) -> dict | None:
-    """검색 결과에서 아티스트(+제목)가 일치하는 첫 곡을 반환."""
-    results = retry(get_yt().search, cfg["query"])
+    """검색 결과에서 곡 카드를 고른다.
+
+    우선순위:
+      1) video_id 일치 + 재생수가 붙어 있는 카드
+      2) 제목·아티스트 일치 + 재생수가 붙어 있는 카드
+      3) video_id 일치 (재생수 없음 → get_song 폴백행)
+      4) 아티스트만 일치하는 카드
+
+    재생수가 붙은 카드를 우선하는 이유: 재생수 없는 카드를 집으면 get_song 으로
+    폴백하는데 그게 깃허브 서버에서 LOGIN_REQUIRED 로 막힌다(2026-08-13 7곡 실패).
+    """
+    results = _search_songs(cfg)
     wants = artist_aliases(cfg)
     want_title = norm(cfg.get("title", "")) or None
-    if cfg.get("video_id"):
-        for r in results:
-            if r.get("videoId") == cfg["video_id"]:
-                return r
-    fallback = None
+    vid = cfg.get("video_id")
+
+    pin_no_views = titled = fallback = None
     for r in results:
-        artists = " ".join(a["name"] for a in r.get("artists", []))
+        has_views = bool(parse_ko_views(r.get("views")))
+        if vid and r.get("videoId") == vid:
+            if has_views:
+                return r                                  # 1)
+            pin_no_views = pin_no_views or r              # 3)
+            continue
         title = r.get("title", "")
         if "inst" in norm(title) and "inst" not in (want_title or ""):
             continue  # (Inst.) 버전 제외
-        if r.get("resultType") != "song" or not _artist_ok(artists, wants):
+        if not _is_song(r):
             continue
+        artists = " ".join(a["name"] for a in r.get("artists", []))
+        if not _artist_ok(artists, wants):
+            continue
+        if titled is None and has_views and _title_ok(title, want_title):
+            titled = r                                    # 2)
         if fallback is None:
-            fallback = r  # 아티스트만 맞는 첫 곡
-        if _title_ok(title, want_title):
-            return r
-    return fallback
+            fallback = r                                  # 4)
+    return titled or pin_no_views or fallback
 
 
+# 2026-08-11 에 넣었던 보정계수.
+# 아트트랙(Topic 채널 업로드)의 재생수와 유튜브뮤직 화면 표시값이 달라서, 읽은 값에
+# 상수를 곱해 화면값에 맞춰두었던 것이다. 하지만 두 숫자가 자라는 속도가 달라서
+# 시간이 갈수록 어긋난다(= 읽은 값이 아니라 만들어낸 값이 시트에 들어간다).
+# 그래서 기본은 끈다. SCALE=1 로 실행하면 예전처럼 곱한다(비교·되돌리기용).
 _SCALE = {"10CM": 1.14498, "우디 - 이 사랑": 1.06598, "한 걸음씩": 1.02662, "fadeaway": 1.16999, "럽미백": 1.17603, "도유카 - Around": 1.16582, "보넥도-이렇게": 1.1615}
+USE_SCALE = os.environ.get("SCALE", "0") == "1"
 
 
 def read_normal(cfg: dict) -> dict:
     song = find_song(cfg)
     if not song:
         raise RuntimeError(f"곡을 찾지 못함: {cfg['query']} / {cfg['artist']}")
-    views = views_of(song)
-    views = round(views * _SCALE.get(cfg["worksheet"], 1))
-    return {"value": format_count(views), "raw": views}
+    api_raw = views_of(song)                       # API 가 실제로 돌려준 값
+    scale = _SCALE.get(cfg["worksheet"], 1)
+    views = round(api_raw * scale) if USE_SCALE else api_raw
+    d = {"value": format_count(views), "raw": views, "api_raw": api_raw}
+    if scale != 1 and not USE_SCALE:
+        # 예전 방식이었다면 얼마였을지 같이 찍어 비교할 수 있게 한다.
+        d["scale_note"] = f"예전 보정(×{scale})이면 {format_count(round(api_raw * scale)):,}"
+    return d
 
 
 def read_dream(cfg: dict) -> dict:
@@ -266,8 +320,8 @@ def read_dream(cfg: dict) -> dict:
       지정 + 셀=SPECIAL / 메모=part.3. 첫 실행에서 셀·메모 숫자가 뒤바뀌어 보이면
       아래 두 줄의 video_id 만 서로 바꾸면 된다.
     """
-    results = retry(get_yt().search, cfg["query"])
-    by_id = {r.get("videoId"): r for r in results if r.get("resultType") == "song"}
+    results = _search_songs(cfg)
+    by_id = {r.get("videoId"): r for r in results if _is_song(r)}
 
     def views_for(vid: str) -> int:
         r = by_id.get(vid)
@@ -275,7 +329,7 @@ def read_dream(cfg: dict) -> dict:
             v = parse_ko_views(r.get("views"))
             if v:
                 return v
-        return get_view_count(vid)  # 검색에 없거나 카드에 숫자 없을 때만(막히면 예외)
+        return player_views(vid)  # 검색에 없거나 카드에 숫자 없을 때만(막히면 예외)
 
     cell_views = views_for(cfg["note_video_id"])   # SPECIAL(메인 표기값) → 셀
     part3_views = views_for(cfg["main_video_id"])  # Part.3 → 메모
@@ -431,7 +485,9 @@ def main():
                 d = fut.result()
                 data_by_idx[i] = d
                 note = f" (메모: {d['note']})" if d.get("note") else ""
-                print(f"[읽음] {name}: {d['raw']:,} -> {d['value']:,}{note}")
+                extra = f"  ← {d['scale_note']}" if d.get("scale_note") else ""
+                api_raw = d.get("api_raw", d["raw"])
+                print(f"[읽음] {name}: API {api_raw:,} -> {d['value']:,}{note}{extra}")
             except Exception as e:  # noqa: BLE001
                 print(f"[오류] {name}: {e}", file=sys.stderr)
                 errors.append((name, str(e)))

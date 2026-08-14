@@ -133,6 +133,61 @@ def query_variants(cfg: dict) -> list[str]:
     return out
 
 
+def _walk(node, key: str, out: list):
+    """중첩된 응답에서 특정 키를 가진 조각을 전부 모은다."""
+    if isinstance(node, dict):
+        if key in node:
+            out.append(node[key])
+        for v in node.values():
+            _walk(v, key, out)
+    elif isinstance(node, list):
+        for v in node:
+            _walk(v, key, out)
+    return out
+
+
+def suggestion_cards(yt: YTMusic, query: str) -> list[dict]:
+    """검색 자동완성(드롭다운)에서 곡 카드를 뽑는다.
+
+    유튜브 뮤직 검색창에 '서랍'을 치면 드롭다운에 이렇게 뜬다.
+        서랍 / 노래 · 10CM · 7104만회 재생 · 그 해 우리는 OST Part.1
+    검색 '결과'에는 재생수가 안 붙어오는 곡도 이 자동완성에는 붙어 오는 경우가 있다.
+    (2026-08-14 확인) 그래서 검색이 실패했을 때 여기서 한 번 더 시도한다.
+
+    search() 결과와 같은 모양으로 맞춰서 돌려주므로 pick_card 를 그대로 쓸 수 있다.
+    """
+    send = getattr(yt, "_send_request", None)
+    if send is None:
+        return []
+    try:
+        res = send("music/get_search_suggestions", {"input": query})
+    except Exception:  # noqa: BLE001
+        return []
+
+    out: list[dict] = []
+    for item in _walk(res, "musicResponsiveListItemRenderer", []):
+        cols = item.get("flexColumns") or []
+        texts: list[str] = []
+        for col in cols:
+            runs = ((col.get("musicResponsiveListItemFlexColumnRenderer") or {})
+                    .get("text") or {}).get("runs") or []
+            texts.append("".join(r.get("text", "") for r in runs))
+        if not texts:
+            continue
+        title, subtitle = texts[0], " ".join(texts[1:])
+        if "재생" not in subtitle:      # '조회수 ○○회'(동영상)는 제외
+            continue
+        vids = _walk(item.get("playlistItemData") or item, "videoId", [])
+        out.append({
+            "title": title,
+            "videoId": vids[0] if vids else None,
+            "views": subtitle,          # parse_plays 가 '7104만회 재생'을 읽는다
+            "artists": [{"name": subtitle}],
+            "resultType": "song",
+        })
+    return out
+
+
 def pick_card(cards: list[dict], cfg: dict) -> tuple[int, str] | None:
     """재생수가 붙은 카드 중에서 이 곡에 해당하는 것을 고른다.
 
@@ -159,13 +214,13 @@ def pick_card(cards: list[dict], cfg: dict) -> tuple[int, str] | None:
             continue  # (Inst.) 제외
 
         if vid and c.get("videoId") == vid:
-            return plays, "videoId"
+            return plays, "videoId", c.get("videoId")
 
         if by_title is None and want_title:
             a = norm(artists_of(c))
             t = norm(title)
             if any(w in a for w in wants) and (t == want_title or want_title in t or t in want_title):
-                by_title = (plays, "제목·아티스트")
+                by_title = (plays, "제목·아티스트", c.get("videoId"))
     return by_title
 
 
@@ -178,7 +233,8 @@ def read_plays(cfg: dict) -> dict:
      카드를 덥석 집어 4만회짜리 엉뚱한 값을 읽었다. 그래서 순서를 이렇게 바꿨다.)
     """
     name = cfg["worksheet"]
-    loose: tuple[int, str] | None = None   # 제목·아티스트로만 맞은 후보
+    loose: tuple[int, str, str | None] | None = None   # 제목·아티스트로만 맞은 후보
+    seen: dict[str, tuple[str, int | None]] = {}       # 진단용: 본 곡 카드들
 
     for attempt in range(1, ATTEMPTS + 1):
         try:
@@ -193,12 +249,28 @@ def read_plays(cfg: dict) -> dict:
                 cards = yt.search(q)
             except Exception as e:  # noqa: BLE001
                 print(f"  [경고] {name}: 검색 실패({q}) {e}")
-                continue
+                cards = []
+
+            # 검색 결과에 재생수가 없으면 자동완성 드롭다운에서도 찾아본다.
+            # (검색엔 안 붙는데 자동완성엔 붙어오는 곡이 있다)
+            if not any(parse_plays(c.get("views")) for c in cards):
+                extra = suggestion_cards(yt, q)
+                if extra:
+                    cards = list(cards) + extra
+
+            # 어떤 카드가 왔는지 기록해 둔다(실패했을 때 원인을 보려고)
+            for c in cards:
+                if c.get("resultType") not in (None, "song"):
+                    continue
+                v = c.get("videoId")
+                if v and v not in seen:
+                    seen[v] = (f"{c.get('title','')} / {artists_of(c)}",
+                               parse_plays(c.get("views")))
 
             got = pick_card(cards, cfg)
             if not got:
                 continue
-            plays, how = got
+            plays, how, found_vid = got
 
             if how == "videoId":          # 확실한 일치 — 바로 채택
                 if attempt > 1 or q != cfg["query"]:
@@ -207,18 +279,26 @@ def read_plays(cfg: dict) -> dict:
                         "how": f"videoId/{q}", "sure": True}
 
             if loose is None:             # 제목만 맞음 — 일단 보류
-                loose = (plays, q)
+                loose = (plays, q, found_vid)
 
         if attempt < ATTEMPTS:
             time.sleep(2 * attempt)
 
     if loose is not None:
-        plays, q = loose
-        print(f"  [주의] {name}: videoId 가 맞는 카드를 못 찾아 제목으로 맞춤 "
-              f"(검색어 '{q}') → 값 확인 필요")
+        plays, q, found_vid = loose
+        print(f"  [주의] {name}: 설정된 videoId({cfg.get('video_id')})가 검색에 없어 "
+              f"제목으로 맞춤 → 실제로 잡힌 videoId={found_vid} / {plays:,}")
+        print(f"         (검색어 '{q}'. 값이 맞으면 songs.yaml 의 video_id 를 "
+              f"{found_vid} 로 바꾸면 확실해집니다)")
         return {"value": format_count(plays), "raw": plays,
                 "how": f"제목만/{q}", "sure": False}
 
+    # 못 읽었을 때: 검색으로 실제 뭐가 왔는지 남겨서 다음에 원인을 보게 한다
+    if seen:
+        print(f"  [진단] {name}: 재생수 붙은 카드를 못 찾음. 검색에 나온 곡 후보 "
+              f"(원하는 videoId={cfg.get('video_id')}):")
+        for i, (v, (label, plays)) in enumerate(list(seen.items())[:6], 1):
+            print(f"         {i}. {label}  videoId={v}  재생수={plays}")
     raise NoPlays("검색 결과에 재생수가 붙어오지 않음")
 
 

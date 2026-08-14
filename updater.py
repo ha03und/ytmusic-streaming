@@ -197,6 +197,37 @@ def filtered_cards(yt: YTMusic, query: str) -> list[dict]:
         return []
 
 
+def browse_cards(yt: YTMusic, browse_id: str | None) -> list[dict]:
+    """앨범/아티스트 페이지를 열어 곡 목록을 가져온다.
+
+    검색 결과에는 재생수를 안 붙여주는 곡이 있어서(도유카·10CM·이별후회),
+    그 곡이 실린 앨범 페이지나 아티스트 페이지에는 붙어 있는지 확인한다.
+    """
+    send = getattr(yt, "_send_request", None)
+    if send is None or not browse_id:
+        return []
+    try:
+        return _cards_from_response(send("browse", {"browseId": browse_id}))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def related_ids(cards: list[dict], vid: str | None) -> list[str]:
+    """우리가 찾는 곡 카드에서 앨범·아티스트 페이지 id 를 뽑는다."""
+    ids: list[str] = []
+    for c in cards:
+        if vid and c.get("videoId") != vid:
+            continue
+        alb = (c.get("album") or {})
+        if isinstance(alb, dict) and alb.get("id"):
+            ids.append(alb["id"])
+        for a in c.get("artists") or []:
+            if isinstance(a, dict) and a.get("id"):
+                ids.append(a["id"])
+        break
+    return ids
+
+
 def suggestion_cards(yt: YTMusic, query: str) -> list[dict]:
     """검색 자동완성(드롭다운)에서 곡 카드를 뽑는다.
 
@@ -281,14 +312,20 @@ def read_plays(cfg: dict) -> dict:
                 print(f"  [경고] {name}: 검색 실패({q}) {e}")
                 cards = []
 
-            # 일반 검색에 재생수가 안 붙어오면, 브라우저에서 하듯 다른 경로도 본다.
+            # 일반 검색에 재생수가 안 붙어오면 브라우저에서 하듯 다른 경로도 본다.
             #   1) '노래' 탭 (검색 + 필터)
             #   2) 검색창 자동완성 드롭다운
-            # 둘 다 재생수가 붙어오는 경우가 있어서 순서대로 시도한다.
-            if not any(parse_plays(c.get("views")) for c in cards):
+            #   3) 그 곡의 앨범 / 아티스트 페이지
+            has_plays = lambda cs: any(parse_plays(c.get("views")) for c in cs)
+            if not has_plays(cards):
                 cards = list(cards) + filtered_cards(yt, q)
-            if not any(parse_plays(c.get("views")) for c in cards):
+            if not has_plays(cards):
                 cards = list(cards) + suggestion_cards(yt, q)
+            if not has_plays(cards):
+                for bid in related_ids(cards, cfg.get("video_id")):
+                    cards = list(cards) + browse_cards(yt, bid)
+                    if has_plays(cards):
+                        break
 
             # 어떤 카드가 왔는지 기록해 둔다(실패했을 때 원인을 보려고)
             for c in cards:

@@ -170,8 +170,16 @@ def pick_card(cards: list[dict], cfg: dict) -> tuple[int, str] | None:
 
 
 def read_plays(cfg: dict) -> dict:
-    """한 곡의 재생수를 읽는다. 세션과 검색어를 바꿔가며 시도한다."""
+    """한 곡의 재생수를 읽는다. 세션과 검색어를 바꿔가며 시도한다.
+
+    videoId 가 일치하는 카드를 끝까지 우선해서 찾는다. 제목·아티스트로만 맞은
+    카드는 곧바로 쓰지 않고 최후 수단으로 남겨둔다.
+    (2026-08-14: 이별후회가 첫 검색어에서 안 잡히자 다음 검색어의 '제목만 맞는'
+     카드를 덥석 집어 4만회짜리 엉뚱한 값을 읽었다. 그래서 순서를 이렇게 바꿨다.)
+    """
     name = cfg["worksheet"]
+    loose: tuple[int, str] | None = None   # 제목·아티스트로만 맞은 후보
+
     for attempt in range(1, ATTEMPTS + 1):
         try:
             yt = new_session()
@@ -186,15 +194,30 @@ def read_plays(cfg: dict) -> dict:
             except Exception as e:  # noqa: BLE001
                 print(f"  [경고] {name}: 검색 실패({q}) {e}")
                 continue
+
             got = pick_card(cards, cfg)
-            if got:
-                plays, how = got
+            if not got:
+                continue
+            plays, how = got
+
+            if how == "videoId":          # 확실한 일치 — 바로 채택
                 if attempt > 1 or q != cfg["query"]:
                     print(f"  [복구] {name}: {attempt}번째 시도 / 검색어 '{q}' 에서 읽음")
-                return {"value": format_count(plays), "raw": plays, "how": f"{how}/{q}"}
+                return {"value": format_count(plays), "raw": plays,
+                        "how": f"videoId/{q}", "sure": True}
+
+            if loose is None:             # 제목만 맞음 — 일단 보류
+                loose = (plays, q)
 
         if attempt < ATTEMPTS:
             time.sleep(2 * attempt)
+
+    if loose is not None:
+        plays, q = loose
+        print(f"  [주의] {name}: videoId 가 맞는 카드를 못 찾아 제목으로 맞춤 "
+              f"(검색어 '{q}') → 값 확인 필요")
+        return {"value": format_count(plays), "raw": plays,
+                "how": f"제목만/{q}", "sure": False}
 
     raise NoPlays("검색 결과에 재생수가 붙어오지 않음")
 
@@ -418,6 +441,14 @@ def main() -> None:
             continue
 
         prev = last_value_above(col_v, row)
+
+        # videoId 확인이 안 된 값은 비교할 직전값이 없으면 쓰지 않는다.
+        # (범위 검사로도 걸러낼 수 없어서 틀린 값이 그대로 들어갈 수 있다)
+        if not got[i].get("sure", True) and not prev:
+            print(f"[막음] {ws}: videoId 미확인 + 비교할 직전값 없음 → 수동 확인 필요")
+            blocked.append(ws)
+            continue
+
         if prev:
             if val < prev * MIN_RATIO:
                 print(f"[막음] {ws}: {val:,} 이 직전값({prev:,})보다 크게 낮음")

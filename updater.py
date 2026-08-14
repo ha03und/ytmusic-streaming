@@ -1,33 +1,51 @@
 #!/usr/bin/env python3
 """
-스트리밍 현황(주요곡) 자동 집계
-- 유튜브 뮤직 재생수를 ytmusicapi 로 읽어서
-- 구글 시트의 각 곡 탭, 오늘 날짜(YYYYMMDD) 행의 J(오전)/K(오후) 열에 기입한다.
+스트리밍 현황(주요곡) — 유튜브 뮤직 재생수 자동 기입
+
+각 곡 탭의 오늘 날짜(YYYYMMDD) 행에서
+  오전 → J열 (유튜브뮤직 재생수 10시)
+  오후 → K열 (유튜브뮤직 재생수 16시)
+에 유튜브 뮤직 재생수를 기입한다.
 
 실행:
-python updater.py --slot morning # J열
-python updater.py --slot afternoon # K열
-python updater.py --slot auto # KST 시각으로 오전/오후 자동 판별 (기본)
-python updater.py --slot morning --dry-run # 시트에 쓰지 않고 읽기만
-
-인증 파일(둘 다 필요):
-browser.json ytmusicapi 브라우저 인증 (ytmusicapi 로 생성)
-service_account.json 구글 서비스 계정 키 (시트를 이 계정과 공유)
-GitHub Actions 에서는 각각 환경변수 YTMUSIC_AUTH / GOOGLE_SERVICE_ACCOUNT_JSON 으로 주입.
+  python updater.py --slot morning     # J열
+  python updater.py --slot afternoon   # K열
+  python updater.py --slot auto        # 예약 정보/시각으로 자동 판별 (기본)
+  python updater.py --dry-run          # 시트에 쓰지 않고 읽기만
+  python updater.py --only 10CM        # 한 곡만 (문제 진단용)
 
 환경변수:
-SHEET_ID 대상 스프레드시트 ID (필수)
-ROUND_TO_MAN=0 설정 시 원본 조회수 그대로 저장(기본은 유튜브 표시값처럼 내림)
-MAX_WORKERS=6 재생수 병렬 조회 스레드 수
-RETRIES=3 네트워크 실패 시 재시도 횟수
+  SHEET_ID                      대상 스프레드시트 ID (필수)
+  GOOGLE_SERVICE_ACCOUNT_JSON   서비스 계정 키 JSON 전체
+  ROUND_TO_MAN=0                내림 없이 원본값 저장
+  ATTEMPTS=3                    재생수를 못 읽었을 때 재시도 횟수
 
-성능/안정성(브라우저 수작업 대비 개선점):
-* 재생수 조회를 스레드로 병렬 처리 → 15곡을 수 초 내 완료
-* 시트 읽기(날짜행/기존값 확인)를 곡별 호출 대신 values_batch_get 1회로 묶음
-* 시트 쓰기를 셀 update 여러 번 대신 values_batch_update 1회로 묶음
-(API 호출 급감 → 쿼터 초과/간헐적 오류 방지)
-* ytmusicapi·gspread 호출에 지수 백오프 재시도
-* 이미 값이 있으면 건너뜀 · 꿈은 메모까지 · V는 값만(메모 미변경)
+
+── 설계 원칙 (이전 판에서 사고가 났던 지점들) ──────────────────────
+
+1. 읽은 값만 기입한다.
+   예전엔 일부 곡에 보정계수를 곱해서 화면값에 맞췄는데(_SCALE), 두 숫자가
+   자라는 속도가 달라 시간이 갈수록 어긋났다. 실측해보니 보정을 끈 값이
+   유튜브뮤직 화면값과 정확히 일치했다. 그래서 어떤 곱셈도 하지 않는다.
+
+2. 재생수가 붙은 검색 카드만 인정한다.
+   카드에 재생수가 없으면 예전엔 get_song(player)으로 폴백했는데, 깃허브
+   같은 데이터센터 IP에서는 그게 LOGIN_REQUIRED 로 막힌다. 로그인을 붙여도
+   안 풀린다(2026-08-13 확인). 그래서 폴백을 아예 두지 않는다.
+
+3. 못 읽으면 비워둔다.
+   틀린 값이 들어가는 것보다 빈칸이 낫다. 못 읽은 곡은 오류가 아니라
+   '수동 입력 대상'으로 보고한다.
+
+4. 이상하면 쓰지 않는다.
+   직전값 대비 너무 낮거나(다른 곡·오류) 너무 높으면(다른 곡) 기입하지 않는다.
+   예전엔 낮은 쪽만 막아서, 도유카가 38만 -> 2440만(같은 가수의 다른 곡)으로
+   튀었을 때 그대로 시트에 들어갔다.
+
+5. 같은 조건으로 재시도하지 않는다.
+   유튜브는 검색 결과에 재생수를 붙여줄 때도 있고 안 붙여줄 때도 있는데,
+   예전 재시도는 같은 세션·같은 검색어로만 다시 물어봐서 늘 같은 답을 받았다.
+   이 판은 시도할 때마다 세션을 새로 만들고 검색어도 바꿔가며 시도한다.
 """
 
 from __future__ import annotations
@@ -37,7 +55,6 @@ import json
 import os
 import re
 import sys
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -48,36 +65,162 @@ import yaml
 from ytmusicapi import YTMusic
 
 KST = ZoneInfo("Asia/Seoul")
-COL_MORNING = 10  # J열 (유튜브뮤직 재생수 10시)
-COL_AFTERNOON = 11  # K열 (유튜브뮤직 재생수 16시)
+
+COL_MORNING = 10    # J
+COL_AFTERNOON = 11  # K
+
 ROUND_TO_MAN = os.environ.get("ROUND_TO_MAN", "1") != "0"
-MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "6"))
-RETRIES = int(os.environ.get("RETRIES", "3"))
+MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "5"))
+ATTEMPTS = int(os.environ.get("ATTEMPTS", "3"))
 
-_AUTH_PATH = "browser.json"
+# 직전값 대비 허용 범위 (이 밖이면 기입하지 않음)
+MIN_RATIO = 0.97
+MAX_RATIO = 1.5
 
 
-# ----------------------------------------------------------------------------
-# 유틸
-# ----------------------------------------------------------------------------
-def retry(fn, *args, **kwargs):
-    """네트워크/쿼터 오류에 대비한 지수 백오프 재시도."""
-    last = None
-    for i in range(RETRIES):
+class NoPlays(Exception):
+    """검색 결과에 재생수가 붙어오지 않아 읽지 못한 경우."""
+
+
+# ============================================================================
+# 유튜브 뮤직에서 재생수 읽기
+# ============================================================================
+
+_VIEWS = re.compile(r"([\d,.]+)\s*(억|만|천)?\s*회")
+
+
+def parse_plays(text: str | None) -> int | None:
+    """'3096만회' -> 30960000, '1.8억회' -> 180000000. 못 읽으면 None."""
+    if not text:
+        return None
+    m = _VIEWS.search(str(text).replace(",", ""))
+    if not m:
+        return None
+    try:
+        num = float(m.group(1))
+    except ValueError:
+        return None
+    unit = {"억": 100_000_000, "만": 10_000, "천": 1_000}.get(m.group(2) or "", 1)
+    return int(round(num * unit))
+
+
+def norm(s: str | None) -> str:
+    return "".join((s or "").lower().split())
+
+
+def artists_of(card: dict) -> str:
+    return " ".join(a.get("name", "") for a in card.get("artists", []) or [])
+
+
+def new_session() -> YTMusic:
+    """새 세션. 시도마다 새로 만드는 이유는 파일 상단 설계원칙 5번 참고."""
+    return YTMusic(language="ko", location="KR")
+
+
+def query_variants(cfg: dict) -> list[str]:
+    """검색어 후보를 앞에서부터 시도한다.
+
+    같은 곡이라도 검색어를 바꾸면 결과 구성이 달라져서, 어떤 검색어에서는
+    재생수가 붙은 카드가 나오기도 한다. 그래서 한 가지만 쓰지 않는다.
+    """
+    title = cfg.get("title") or ""
+    artist = cfg["artist"][0] if isinstance(cfg["artist"], list) else cfg["artist"]
+    out: list[str] = []
+    for q in (cfg["query"], f"{title} {artist}", f"{artist} {title}", title):
+        q = " ".join(str(q).split())
+        if q and q not in out:
+            out.append(q)
+    return out
+
+
+def pick_card(cards: list[dict], cfg: dict) -> tuple[int, str] | None:
+    """재생수가 붙은 카드 중에서 이 곡에 해당하는 것을 고른다.
+
+    우선순위
+      1) video_id 가 일치하는 카드
+      2) 제목·아티스트가 모두 맞는 카드
+    재생수가 없는 카드는 아예 후보로 보지 않는다(설계원칙 2번).
+    """
+    want_title = norm(cfg.get("title"))
+    wants = cfg["artist"] if isinstance(cfg["artist"], list) else [cfg["artist"]]
+    wants = [norm(a) for a in wants if norm(a)]
+    vid = cfg.get("video_id")
+
+    by_title: tuple[int, str] | None = None
+    for c in cards:
+        if c.get("resultType") not in (None, "song"):
+            continue
+        plays = parse_plays(c.get("views"))
+        if not plays:
+            continue
+
+        title = c.get("title", "")
+        if "inst" in norm(title) and "inst" not in want_title:
+            continue  # (Inst.) 제외
+
+        if vid and c.get("videoId") == vid:
+            return plays, "videoId"
+
+        if by_title is None and want_title:
+            a = norm(artists_of(c))
+            t = norm(title)
+            if any(w in a for w in wants) and (t == want_title or want_title in t or t in want_title):
+                by_title = (plays, "제목·아티스트")
+    return by_title
+
+
+def read_plays(cfg: dict) -> dict:
+    """한 곡의 재생수를 읽는다. 세션과 검색어를 바꿔가며 시도한다."""
+    name = cfg["worksheet"]
+    for attempt in range(1, ATTEMPTS + 1):
         try:
-            return fn(*args, **kwargs)
+            yt = new_session()
         except Exception as e:  # noqa: BLE001
-            last = e
-            if i < RETRIES - 1:
-                time.sleep(1.5 * (i + 1))
-    raise last
+            print(f"  [경고] {name}: 세션 생성 실패({e})")
+            time.sleep(2 * attempt)
+            continue
+
+        for q in query_variants(cfg):
+            try:
+                cards = yt.search(q)
+            except Exception as e:  # noqa: BLE001
+                print(f"  [경고] {name}: 검색 실패({q}) {e}")
+                continue
+            got = pick_card(cards, cfg)
+            if got:
+                plays, how = got
+                if attempt > 1 or q != cfg["query"]:
+                    print(f"  [복구] {name}: {attempt}번째 시도 / 검색어 '{q}' 에서 읽음")
+                return {"value": format_count(plays), "raw": plays, "how": f"{how}/{q}"}
+
+        if attempt < ATTEMPTS:
+            time.sleep(2 * attempt)
+
+    raise NoPlays("검색 결과에 재생수가 붙어오지 않음")
+
+
+def read_dream(cfg: dict) -> dict:
+    """태연 '꿈' — 두 버전을 videoId 로 구분한다.
+    셀   = note_video_id (SPECIAL)
+    메모 = 'part.3 ver ○○만회' (main_video_id = Part.3)
+    """
+    cell = read_plays({**cfg, "video_id": cfg["note_video_id"]})
+    try:
+        p3 = read_plays({**cfg, "video_id": cfg["main_video_id"]})
+        cell["note"] = f"part.3 ver {p3['raw'] // 10_000}만회"
+    except NoPlays:
+        print(f"  [경고] 꿈: part.3 버전을 못 읽어 메모 생략")
+    return cell
+
+
+def read_one(cfg: dict) -> dict:
+    return read_dream(cfg) if cfg.get("mode") == "dream" else read_plays(cfg)
 
 
 def format_count(views: int) -> int:
-    """유튜브 뮤직 한국어 표시값과 동일하게 내림한다.
-    - 1억 미만: 만(10,000) 단위 내림 (예: 1,484,213 -> 1,480,000 = 148만)
-    - 1억 이상: 0.1억(10,000,000) 단위 내림 (예: 183,900,000 -> 180,000,000 = 1.8억)
-    ROUND_TO_MAN=0 이면 원본 그대로 반환.
+    """유튜브 뮤직 표시값과 동일하게 내림.
+    1억 이상은 0.1억 단위, 그 미만은 만 단위.
+    (검색 카드에서 읽은 값은 이미 표시값이라 대개 그대로다.)
     """
     v = int(views)
     if not ROUND_TO_MAN:
@@ -87,319 +230,28 @@ def format_count(views: int) -> int:
     return (v // 10_000) * 10_000
 
 
-def to_man(views: int) -> int:
-    """만 단위 정수 (메모 표기용). 예: 50,315,000 -> 5031"""
-    return int(views) // 10_000
-
-
-def norm(s: str) -> str:
-    return "".join((s or "").lower().split())
-
-
-def col_letter(col: int) -> str:
-    return gspread.utils.rowcol_to_a1(1, col).rstrip("1234567890")
-
-
-# ----------------------------------------------------------------------------
-# 인증
-# ----------------------------------------------------------------------------
-def ensure_auth_file() -> str | None:
-    """browser.json 을 준비하고 경로를 반환. 없으면 None(비로그인 모드).
-
-    검색/재생수 조회는 공개 데이터라 인증 없이도 동작한다.
-    YTMUSIC_AUTH 를 설정하면 그 값을 browser.json 으로 써서 로그인 모드로 쓴다.
-    """
-    if os.environ.get("YTMUSIC_AUTH") and not os.path.exists(_AUTH_PATH):
-        with open(_AUTH_PATH, "w", encoding="utf-8") as f:
-            f.write(os.environ["YTMUSIC_AUTH"])
-    if not os.path.exists(_AUTH_PATH):
-        print("[info] browser.json 없음 → 비로그인 모드로 조회합니다. "
-              "(검색에 재생수가 안 붙는 곡은 실패할 수 있음. "
-              "GitHub Secrets 에 YTMUSIC_AUTH 를 등록하면 로그인 모드로 동작)")
-        return None
-    print("[info] YTMUSIC_AUTH 확인 → 로그인 모드로 조회합니다.")
-    return _AUTH_PATH
-
-
-_tl = threading.local()
-
-
-def get_yt() -> YTMusic:
-    """스레드별 YTMusic 인스턴스(requests 세션 공유 회피)."""
-    if not hasattr(_tl, "yt"):
-        auth = _AUTH_PATH if os.path.exists(_AUTH_PATH) else None
-        # 한국어 로케일: 검색 결과의 재생수가 "○○만회 / ○.○억회" 로 와서
-        # 시트에 수작업으로 넣던 값과 동일하게 맞출 수 있다.
-        _tl.yt = YTMusic(auth, language="ko", location="KR")
-    return _tl.yt
-
-
-def load_sheet():
-    sheet_id = os.environ.get("SHEET_ID")
-    if not sheet_id:
-        sys.exit("환경변수 SHEET_ID 가 필요합니다.")
-    if os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON"):
-        info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-        gc = gspread.service_account_from_dict(info)
-    else:
-        gc = gspread.service_account(filename="service_account.json")
-    return gc.open_by_key(sheet_id)
-
-
-# ----------------------------------------------------------------------------
-# 유튜브 뮤직 재생수 읽기
-# 재생수는 get_song(videoId).videoDetails.viewCount 를 사용한다. YT Music 이
-# 화면에 표시하는 "○○만회 재생" 과 동일하며, 검색 결과 카드에 숫자가 없어도
-# API 로는 항상 얻을 수 있다(수작업 때처럼 앨범 페이지를 열 필요가 없음).
-# ----------------------------------------------------------------------------
-_VIEWS_RE = re.compile(r"([\d,.]+)\s*(억|만|천)?")
-
-
-def parse_ko_views(text: str) -> int | None:
-    """검색 결과의 한국어 재생수 표기를 정수로. 예) '26만회'->260000, '1.8억회'->180000000"""
-    if not text:
-        return None
-    t = str(text).replace(",", "").replace("회", "").strip()
-    m = _VIEWS_RE.match(t)
-    if not m:
-        return None
-    try:
-        num = float(m.group(1))
-    except ValueError:
-        return None
-    unit = m.group(2)
-    mult = {"억": 100_000_000, "만": 10_000, "천": 1_000}.get(unit or "", 1)
-    return int(round(num * mult))
-
-
-def player_views(video_id: str) -> int:
-    """get_song(player) 로 재생수를 읽는다. 검색 카드에 숫자가 없을 때의 폴백.
-
-    (예전엔 views_of 폴백과 get_view_count 두 곳에 같은 코드가 나뉘어 있었다.)
-    """
-    song = retry(get_yt().get_song, video_id)
-    details = song.get("videoDetails") or {}
-    if "viewCount" not in details:
-        status = (song.get("playabilityStatus") or {}).get("status")
-        raise RuntimeError(f"재생수를 읽지 못함 (검색결과에 없음, player status={status})")
-    return int(details["viewCount"])
-
-
-def views_of(item: dict) -> int:
-    """검색 결과 항목의 재생수. 검색에 없으면 player(get_song)로 폴백."""
-    return parse_ko_views(item.get("views")) or player_views(item["videoId"])
-
-
-def _title_ok(title: str, want_title: str | None) -> bool:
-    """제목 일치. 완전일치 우선, 안 되면 부분 포함으로 완화(부제/피처링 표기 차이 대응)."""
-    if not want_title:
-        return True
-    t = norm(title)
-    return t == want_title or want_title in t or t in want_title
-
-
-def artist_aliases(cfg: dict) -> list[str]:
-    """songs.yaml 의 artist 는 문자열 또는 목록.
-
-    유튜브뮤직을 한국어(ko)로 조회하면 아티스트명이 한글로 온다
-    (예: fromis_9 -> 프로미스나인). 표기가 바뀔 수 있는 팀은 목록으로 적어둔다.
-    """
-    a = cfg["artist"]
-    names = a if isinstance(a, list) else [a]
-    return [norm(n) for n in names if norm(n)]
-
-
-def _artist_ok(artists: str, wants: list[str]) -> bool:
-    a = norm(artists)
-    return any(w in a for w in wants)
-
-
-# 유튜브뮤직 화면에서 '노래' 탭을 누르면 안 보이던 재생수가 보인다. 검색 API도
-# filter="songs" 를 주면 같은 효과라, 재생수가 카드에 붙어 와서 get_song 폴백
-# (=깃허브에서 LOGIN_REQUIRED 로 막힘)을 안 타게 된다.
-# 2026-08-11 에 한 번 시도했다가 "비로그인이라 깨짐"으로 되돌렸는데, 지금은
-# YTMUSIC_AUTH 가 등록돼 로그인 모드라 다시 쓸 수 있다.
-# 문제가 생기면 SONGS_FILTER=0 으로 끄면 예전(일반 검색)으로 돌아간다.
-USE_SONGS_FILTER = os.environ.get("SONGS_FILTER", "1") != "0"
-
-
-def _search_songs(cfg: dict) -> list:
-    """'노래' 필터로 검색하고, 막히거나 비면 일반 검색으로 폴백."""
-    if USE_SONGS_FILTER:
-        try:
-            r = retry(get_yt().search, cfg["query"], filter="songs")
-            if r:
-                return r
-            print(f"[info] {cfg['worksheet']}: filter=songs 결과 없음 → 일반 검색")
-        except Exception as e:  # noqa: BLE001
-            print(f"[info] {cfg['worksheet']}: filter=songs 실패({e}) → 일반 검색")
-    return retry(get_yt().search, cfg["query"])
-
-
-def _is_song(r: dict) -> bool:
-    """filter='songs' 결과는 resultType 이 없을 수 있어 함께 허용."""
-    return r.get("resultType") in (None, "song")
-
-
-def find_song(cfg: dict) -> dict | None:
-    """검색 결과에서 곡 카드를 고른다.
-
-    우선순위:
-      1) video_id 일치 + 재생수가 붙어 있는 카드
-      2) 제목·아티스트 일치 + 재생수가 붙어 있는 카드
-      3) video_id 일치 (재생수 없음 → get_song 폴백행)
-      4) 아티스트만 일치하는 카드
-
-    재생수가 붙은 카드를 우선하는 이유: 재생수 없는 카드를 집으면 get_song 으로
-    폴백하는데 그게 깃허브 서버에서 LOGIN_REQUIRED 로 막힌다(2026-08-13 7곡 실패).
-    """
-    results = _search_songs(cfg)
-    wants = artist_aliases(cfg)
-    want_title = norm(cfg.get("title", "")) or None
-    vid = cfg.get("video_id")
-
-    pin_no_views = titled = fallback = None
-    for r in results:
-        has_views = bool(parse_ko_views(r.get("views")))
-        if vid and r.get("videoId") == vid:
-            if has_views:
-                return r                                  # 1)
-            pin_no_views = pin_no_views or r              # 3)
-            continue
-        title = r.get("title", "")
-        if "inst" in norm(title) and "inst" not in (want_title or ""):
-            continue  # (Inst.) 버전 제외
-        if not _is_song(r):
-            continue
-        artists = " ".join(a["name"] for a in r.get("artists", []))
-        if not _artist_ok(artists, wants):
-            continue
-        if titled is None and has_views and _title_ok(title, want_title):
-            titled = r                                    # 2)
-        if fallback is None:
-            fallback = r                                  # 4)
-    return titled or pin_no_views or fallback
-
-
-# 2026-08-11 에 넣었던 보정계수.
-# 아트트랙(Topic 채널 업로드)의 재생수와 유튜브뮤직 화면 표시값이 달라서, 읽은 값에
-# 상수를 곱해 화면값에 맞춰두었던 것이다. 하지만 두 숫자가 자라는 속도가 달라서
-# 시간이 갈수록 어긋난다(= 읽은 값이 아니라 만들어낸 값이 시트에 들어간다).
-# 그래서 기본은 끈다. SCALE=1 로 실행하면 예전처럼 곱한다(비교·되돌리기용).
-_SCALE = {"10CM": 1.14498, "우디 - 이 사랑": 1.06598, "한 걸음씩": 1.02662, "fadeaway": 1.16999, "럽미백": 1.17603, "도유카 - Around": 1.16582, "보넥도-이렇게": 1.1615}
-USE_SCALE = os.environ.get("SCALE", "0") == "1"
-
-
-def read_normal(cfg: dict) -> dict:
-    song = find_song(cfg)
-    if not song:
-        raise RuntimeError(f"곡을 찾지 못함: {cfg['query']} / {cfg['artist']}")
-    api_raw = views_of(song)                       # API 가 실제로 돌려준 값
-    scale = _SCALE.get(cfg["worksheet"], 1)
-    views = round(api_raw * scale) if USE_SCALE else api_raw
-    d = {"value": format_count(views), "raw": views, "api_raw": api_raw}
-    if scale != 1 and not USE_SCALE:
-        # 예전 방식이었다면 얼마였을지 같이 찍어 비교할 수 있게 한다.
-        d["scale_note"] = f"예전 보정(×{scale})이면 {format_count(round(api_raw * scale)):,}"
-    return d
-
-
-def read_dream(cfg: dict) -> dict:
-    """태연 '꿈' 두 버전을 videoId 로 정확히 구분해서 읽는다.
-    셀   = note_video_id(SPECIAL) 버전 재생수
-    메모 = 'part.3 ver ○○만회'  (main_video_id = Part.3 버전)
-
-    기존 방식은 '꿈' 검색 카드 중 재생수 큰 값 2개를 골라 1등=셀 / 2등=메모로 썼는데,
-    두 버전이 앨범 필드로 구분되지 않고 카드가 하나만 잡히는 경우가 많아 셀과 메모가
-    같은 숫자로 겹쳤다(예: 5047/5047, 5082/5082). 그래서 아래처럼 songs.yaml 의
-    main_video_id / note_video_id 를 검색 결과 카드의 videoId 와 직접 대조해 각 버전을
-    확실히 집는다. 재생수는 (get_song 이 깃허브 서버에서 차단되므로) 검색 결과에서 읽고,
-    카드가 없을 때만 get_song 으로 폴백한다.
-
-    ※ 매핑 근거: songs.yaml 의 main_album_contains 가 main_video_id 를 'Part.3' 로
-      지정 + 셀=SPECIAL / 메모=part.3. 첫 실행에서 셀·메모 숫자가 뒤바뀌어 보이면
-      아래 두 줄의 video_id 만 서로 바꾸면 된다.
-    """
-    results = _search_songs(cfg)
-    by_id = {r.get("videoId"): r for r in results if _is_song(r)}
-
-    def views_for(vid: str) -> int:
-        r = by_id.get(vid)
-        if r:
-            v = parse_ko_views(r.get("views"))
-            if v:
-                return v
-        return player_views(vid)  # 검색에 없거나 카드에 숫자 없을 때만(막히면 예외)
-
-    cell_views = views_for(cfg["note_video_id"])   # SPECIAL(메인 표기값) → 셀
-    part3_views = views_for(cfg["main_video_id"])  # Part.3 → 메모
-    return {
-        "value": format_count(cell_views),
-        "raw": cell_views,
-        "note": f"part.3 ver {to_man(part3_views)}만회",
-    }
-
-
-def read_one(cfg: dict) -> dict:
-    return read_dream(cfg) if cfg.get("mode") == "dream" else read_normal(cfg)
-
-
-# 검색 결과에 재생수가 "그때만" 안 붙어 오는 일이 잦다. 그러면 막혀 있는
-# get_song 폴백으로 넘어가 LOGIN_REQUIRED 로 실패한다(2026-08-13 오전 7곡 실패).
-# 유튜브뮤직에는 값이 멀쩡히 있는데 조회 시점에만 안 잡히는 것이라,
-# 잠깐 쉬었다가 다시 검색하면 대체로 붙어 온다. 그래서 곡 단위로 재시도한다.
-READ_ATTEMPTS = int(os.environ.get("READ_ATTEMPTS", "4"))
-READ_RETRY_DELAY = float(os.environ.get("READ_RETRY_DELAY", "2.0"))
-
-
-def read_one_safe(cfg: dict) -> dict:
-    """read_one 을 재시도. 실패하면 대기시간을 늘려가며 다시 검색한다."""
-    last = None
-    for i in range(READ_ATTEMPTS):
-        try:
-            d = read_one(cfg)
-            if i:
-                print(f"[재시도 성공] {cfg['worksheet']}: {i + 1}번째 시도에서 읽음")
-            return d
-        except Exception as e:  # noqa: BLE001
-            last = e
-            if i < READ_ATTEMPTS - 1:
-                time.sleep(READ_RETRY_DELAY * (i + 1))
-    raise last
-
-
-# ----------------------------------------------------------------------------
-# 메인
-# ----------------------------------------------------------------------------
-# 예약(cron)별 고정 열. GitHub Actions 예약은 수 시간 지연될 수 있어서
-# 실행 "시각"으로 오전/오후를 판별하면, 늦게 돈 오전 실행이 오후로 잡혀 J열이 빈다.
-# 그래서 "어느 예약에서 왔는지"로 열을 정한다.
-#
-# ※ update.yml 의 cron 을 바꾸면 여기도 같이 추가할 것.
-# (없는 cron 이면 실행 시각으로 판별하는 예전 방식으로 돌아간다)
-#
-# 예약이 아예 실행되지 않는 날이 있어서(GitHub 부하로 드롭됨) 오전·오후 각각
-# 30분 간격으로 여러 번 걸어둔다. 먼저 성공한 실행이 값을 넣고, 뒤에 오는
-# 실행은 "이미 값 있음"으로 건너뛰므로 중복 기입은 생기지 않는다.
+# ============================================================================
+# 실행 슬롯 / 날짜
+# ============================================================================
+# GitHub 예약은 수 시간 늦게 돌 때가 있다. 실행 '시각'으로 오전/오후를 판별하면
+# 늦게 돈 오전 실행이 오후로 잡혀 J열이 빈다. 그래서 '어느 예약에서 왔는지'로
+# 열을 정하고, 날짜도 '원래 돌았어야 할 시각' 기준으로 잡는다.
 CRON_SLOT = {
-    # 오전 -> 항상 J열
-    "50 0 * * *": "morning",   # 09:50 KST
-    "20 1 * * *": "morning",   # 10:20 KST
-    "50 1 * * *": "morning",   # 10:50 KST
-    "20 2 * * *": "morning",   # 11:20 KST
-    "0 0 * * *": "morning",    # (구) 09:00 KST
-    "0 1 * * *": "morning",    # (구) 10:00 KST
-    # 오후 -> 항상 K열
-    "55 6 * * *": "afternoon",  # 15:55 KST
-    "25 7 * * *": "afternoon",  # 16:25 KST
-    "55 7 * * *": "afternoon",  # 16:55 KST
-    "25 8 * * *": "afternoon",  # 17:25 KST
-    "0 7 * * *": "afternoon",   # (구) 16:00 KST
+    "50 0 * * *": "morning",    # 09:50 KST
+    "20 1 * * *": "morning",    # 10:20
+    "50 1 * * *": "morning",    # 10:50
+    "20 2 * * *": "morning",    # 11:20
+    "0 0 * * *":  "morning",    # (구) 09:00
+    "0 1 * * *":  "morning",    # (구) 10:00
+    "55 6 * * *": "afternoon",  # 15:55
+    "25 7 * * *": "afternoon",  # 16:25
+    "55 7 * * *": "afternoon",  # 16:55
+    "25 8 * * *": "afternoon",  # 17:25
+    "0 7 * * *":  "afternoon",  # (구) 16:00
 }
 
 
 def event_schedule() -> str | None:
-    """GitHub Actions 예약 실행이면 이 실행을 띄운 cron 문자열을 반환."""
     path = os.environ.get("GITHUB_EVENT_PATH")
     if not path or not os.path.exists(path):
         return None
@@ -411,160 +263,195 @@ def event_schedule() -> str | None:
     return sched.strip() if sched else None
 
 
-def slot_from_schedule() -> str | None:
-    """어느 예약에서 왔는지로 슬롯(오전/오후)을 정한다."""
-    sched = event_schedule()
-    if not sched:
-        return None
-    slot = CRON_SLOT.get(sched)
-    print(f"[info] 예약 cron='{sched}' -> slot={slot or '판별불가(시각으로 대체)'}")
-    return slot
+def resolve_slot(slot: str) -> tuple[str, int]:
+    if slot == "auto":
+        sched = event_schedule()
+        slot = (CRON_SLOT.get(sched) if sched else None) or (
+            "morning" if datetime.now(KST).hour < 12 else "afternoon"
+        )
+        if sched:
+            print(f"[info] 예약 cron='{sched}' -> {slot}")
+    return slot, (COL_MORNING if slot == "morning" else COL_AFTERNOON)
 
 
-def target_date_str() -> str:
-    """기입할 날짜(YYYYMMDD).
-
-    예약이 크게 지연되어 자정을 넘겨 실행되면, '실행된 날짜'로 행을 찾을 경우
-    엉뚱한 날짜에 값이 들어간다(예: 8/4 16:55 예약이 8/5 01:24 에 실행 → 8/5 에 기입).
-    그래서 예약 실행일 때는 cron 에 적힌 '원래 돌았어야 할 시각'을 기준으로 날짜를 정한다.
-    """
+def target_date() -> str:
     now = datetime.now(KST)
     sched = event_schedule()
     if sched:
         try:
             minute, hour = int(sched.split()[0]), int(sched.split()[1])
-            # cron 은 UTC 기준 -> KST 로 환산
-            due = (now.replace(hour=0, minute=0, second=0, microsecond=0)
-                   + timedelta(hours=hour + 9, minutes=minute))
+            due = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+                hours=hour + 9, minutes=minute)
             if due > now:
-                # 오늘 예정 시각이 아직 안 왔다 = 어제 예약이 밀려서 지금 돈 것
-                due -= timedelta(days=1)
+                due -= timedelta(days=1)   # 어제 예약이 밀려서 지금 돈 것
             if due.date() != now.date():
-                print(f"[info] 예약 지연 감지: 원래 {due:%Y-%m-%d %H:%M} KST 예정 "
-                      f"-> {due:%Y%m%d} 행에 기입")
+                print(f"[info] 예약 지연 감지 -> {due:%Y%m%d} 행에 기입")
             return due.strftime("%Y%m%d")
         except (ValueError, IndexError):
             pass
     return now.strftime("%Y%m%d")
 
 
-def resolve_slot(slot: str) -> tuple[str, int]:
-    if slot == "auto":
-        slot = slot_from_schedule() or (
-            "morning" if datetime.now(KST).hour < 12 else "afternoon"
-        )
-    return slot, (COL_MORNING if slot == "morning" else COL_AFTERNOON)
+# ============================================================================
+# 시트
+# ============================================================================
+
+def open_sheet():
+    sheet_id = os.environ.get("SHEET_ID")
+    if not sheet_id:
+        sys.exit("환경변수 SHEET_ID 가 필요합니다.")
+    if os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON"):
+        gc = gspread.service_account_from_dict(
+            json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]))
+    else:
+        gc = gspread.service_account(filename="service_account.json")
+    return gc.open_by_key(sheet_id)
 
 
-def main():
+def col_letter(col: int) -> str:
+    return gspread.utils.rowcol_to_a1(1, col).rstrip("0123456789")
+
+
+def find_row(col_a: list, date_str: str) -> int | None:
+    for i, row in enumerate(col_a, start=1):
+        if row and str(row[0]).strip() == date_str:
+            return i
+    return None
+
+
+def last_value_above(col_vals: list, row: int) -> int | None:
+    for rv in reversed(col_vals[: row - 1]):
+        if rv and str(rv[0]).strip() not in ("", "None"):
+            try:
+                return int(str(rv[0]).replace(",", "").strip())
+            except ValueError:
+                return None
+    return None
+
+
+# ============================================================================
+# 메인
+# ============================================================================
+
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--slot", choices=["morning", "afternoon", "auto"], default="auto")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--only", help="이 탭 이름 한 곡만 처리 (진단용)")
     ap.add_argument("--config", default="songs.yaml")
     args = ap.parse_args()
 
     slot, col = resolve_slot(args.slot)
     cl = col_letter(col)
-    date_str = target_date_str()
-    print(f"== {date_str} / {slot} (열={cl}) / round={'만' if ROUND_TO_MAN else 'raw'} / "
-          f"dry_run={args.dry_run} ==")
+    date_str = target_date()
 
     with open(args.config, encoding="utf-8") as f:
         songs = yaml.safe_load(f)["songs"]
+    if args.only:
+        songs = [s for s in songs if s["worksheet"] == args.only]
+        if not songs:
+            sys.exit(f"그런 탭 없음: {args.only}")
 
-    ensure_auth_file()
+    print(f"== {date_str} / {slot} ({cl}열) / {len(songs)}곡 / dry_run={args.dry_run} ==")
 
-    # 1) 재생수 병렬 조회 -------------------------------------------------------
-    data_by_idx: dict[int, dict] = {}
-    errors: list[tuple[str, str]] = []
+    # 1) 재생수 조회 ----------------------------------------------------------
+    got: dict[int, dict] = {}
+    unread: list[str] = []      # 재생수를 못 읽은 곡
+
+    def work(idx_cfg):
+        i, cfg = idx_cfg
+        try:
+            return i, read_one(cfg), None
+        except NoPlays as e:
+            return i, None, str(e)
+        except Exception as e:  # noqa: BLE001
+            return i, None, f"오류: {e}"
+
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futs = {ex.submit(read_one_safe, s): i for i, s in enumerate(songs)}
-        for fut, i in futs.items():
+        for i, data, err in ex.map(work, list(enumerate(songs))):
             name = songs[i]["worksheet"]
-            try:
-                d = fut.result()
-                data_by_idx[i] = d
-                note = f" (메모: {d['note']})" if d.get("note") else ""
-                extra = f"  ← {d['scale_note']}" if d.get("scale_note") else ""
-                api_raw = d.get("api_raw", d["raw"])
-                print(f"[읽음] {name}: API {api_raw:,} -> {d['value']:,}{note}{extra}")
-            except Exception as e:  # noqa: BLE001
-                print(f"[오류] {name}: {e}", file=sys.stderr)
-                errors.append((name, str(e)))
+            if data:
+                got[i] = data
+                note = f"  +메모({data['note']})" if data.get("note") else ""
+                print(f"[읽음] {name}: {data['value']:,}{note}")
+            else:
+                print(f"[못읽음] {name}: {err}")
+                unread.append(name)
 
     if args.dry_run:
         print("\n[dry-run] 시트에 쓰지 않음.")
-        sys.exit(1 if errors else 0)
+        if unread:
+            print("수동 입력 필요: " + ", ".join(unread))
+        return
 
-    # 2) 시트 날짜행/기존값 배치 읽기 ------------------------------------------
-    sheet = load_sheet()
+    # 2) 시트 읽기 ------------------------------------------------------------
+    sheet = open_sheet()
     ranges: list[str] = []
     for s in songs:
-        ws = s["worksheet"]
-        ranges.append(f"'{ws}'!A:A")
-        ranges.append(f"'{ws}'!{cl}:{cl}")
-    vranges = retry(sheet.values_batch_get, ranges)["valueRanges"]
+        ranges.append(f"'{s['worksheet']}'!A:A")
+        ranges.append(f"'{s['worksheet']}'!{cl}:{cl}")
+    vranges = sheet.values_batch_get(ranges)["valueRanges"]
 
-    # 3) 쓸 셀 계산 -------------------------------------------------------------
+    # 3) 쓸 셀 판정 -----------------------------------------------------------
     updates: list[dict] = []
     notes: list[tuple[str, str, str]] = []
-    report: list[tuple[str, str, str]] = []  # (worksheet, 셀/상태, 값/사유)
+    blocked: list[str] = []     # 값이 이상해서 막은 곡
+    report: list[tuple[str, str]] = []
+
     for i, s in enumerate(songs):
         ws = s["worksheet"]
-        if i not in data_by_idx:
+        if i not in got:
             continue
-        d = data_by_idx[i]
-        a_vals = vranges[2 * i].get("values", [])
-        c_vals = vranges[2 * i + 1].get("values", [])
-        row = next((r for r, rv in enumerate(a_vals, start=1)
-                    if rv and str(rv[0]).strip() == date_str), None)
+        val = got[i]["value"]
+
+        col_a = vranges[2 * i].get("values", [])
+        col_v = vranges[2 * i + 1].get("values", [])
+
+        row = find_row(col_a, date_str)
         if row is None:
-            report.append((ws, "건너뜀", f"{date_str} 행 없음"))
-            continue
-        cur = c_vals[row - 1][0] if len(c_vals) >= row and c_vals[row - 1] else ""
-        if str(cur).strip() not in ("", "None"):
-            report.append((ws, "건너뜀", f"이미 값 있음({cur})"))
+            report.append((ws, f"{date_str} 행 없음"))
             continue
 
-        # 참고용 경고(기입은 그대로 진행). 재생수가 직전 기록보다 작으면
-        # 다른 곡을 잡았을 수 있으니 로그에 표시만 해준다.
-        # 유튜브뮤직 쪽 일시적 오류로 값이 튈 수도 있어 막지는 않는다.
-        prev = None
-        for rv in reversed(c_vals[: row - 1]):
-            if rv and str(rv[0]).strip() not in ("", "None"):
-                try:
-                    prev = int(str(rv[0]).replace(",", "").strip())
-                except ValueError:
-                    prev = None
-                break
-        if prev is not None and d["value"] < prev * 0.97:
-            print(f"[주의] {ws}: 직전값({prev:,})보다 크게 작음 → 곡 매칭 확인 권장(건너뜀)")
+        cur = col_v[row - 1][0] if len(col_v) >= row and col_v[row - 1] else ""
+        if str(cur).strip() not in ("", "None"):
+            report.append((ws, f"이미 값 있음({cur})"))
             continue
+
+        prev = last_value_above(col_v, row)
+        if prev:
+            if val < prev * MIN_RATIO:
+                print(f"[막음] {ws}: {val:,} 이 직전값({prev:,})보다 크게 낮음")
+                blocked.append(ws)
+                continue
+            if val > prev * MAX_RATIO:
+                print(f"[막음] {ws}: {val:,} 이 직전값({prev:,})의 {MAX_RATIO}배 초과 "
+                      f"— 다른 곡일 수 있음")
+                blocked.append(ws)
+                continue
 
         a1 = f"{cl}{row}"
-        updates.append({"range": f"'{ws}'!{a1}", "values": [[d["value"]]]})
-        if d.get("note"):
-            notes.append((ws, a1, d["note"]))
-        report.append((ws, a1, f"{d['value']:,}" + (f" +메모('{d['note']}')" if d.get("note") else "")))
+        updates.append({"range": f"'{ws}'!{a1}", "values": [[val]]})
+        if got[i].get("note"):
+            notes.append((ws, a1, got[i]["note"]))
+        report.append((ws, f"{a1} = {val:,}"))
 
-    # 4) 값 배치 쓰기 + 메모 ----------------------------------------------------
+    # 4) 쓰기 ----------------------------------------------------------------
     if updates:
-        retry(sheet.values_batch_update, {"valueInputOption": "RAW", "data": updates})
-    for ws, a1, note in notes:
-        wsobj = retry(sheet.worksheet, ws)
-        retry(wsobj.update_note, a1, note)  # V 등 값만인 곡은 여기 오지 않음
+        sheet.values_batch_update({"valueInputOption": "RAW", "data": updates})
+    for ws, a1, note in notes:   # 꿈만 해당. V 등은 메모를 건드리지 않는다.
+        sheet.worksheet(ws).update_note(a1, note)
 
-    # 5) 요약 -------------------------------------------------------------------
+    # 5) 요약 ----------------------------------------------------------------
     print("\n== 결과 ==")
     width = max((len(r[0]) for r in report), default=4)
-    for ws, cell, val in report:
-        print(f" {ws:<{width}} {cell:<8} {val}")
-    skipped = sum(1 for _, cell, _ in report if cell == "건너뜀")
-    print(f"\n입력 {len(updates)}곡 / 건너뜀 {skipped}곡 / 오류 {len(errors)}곡")
+    for ws, msg in report:
+        print(f"  {ws:<{width}}  {msg}")
 
-    if errors:
-        print("실패: " + ", ".join(n for n, _ in errors), file=sys.stderr)
-        sys.exit(1)
+    todo = sorted(set(unread + blocked))
+    print(f"\n기입 {len(updates)}곡 / 수동필요 {len(todo)}곡")
+    if todo:
+        print(">>> 손으로 넣을 곡: " + ", ".join(todo))
+        print(f"    유튜브 뮤직 검색 → '노래' 필터 → 재생수 확인 → {cl}열에 입력")
     print("완료.")
 
 

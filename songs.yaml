@@ -19,10 +19,12 @@ songs:
     artist: "경서"
     title: "슈퍼스타"
 
-  # 2026-08-13 수정: video_id 가 조회수 1.7만짜리 다른 업로드(7DnwSeOsejE)를
-  # 가리키고 있어서 매칭이 폴백으로 넘어가 3098만(실제 3096만)이 들어갔다.
+  # 2026-08-14: video_id 는 7DnwSeOsejE 가 맞다.
+  # 브라우저 주소창의 Ep6o9_n0taU 로 바꿔봤더니 검색 결과에 그 id 가 아예 없어서
+  # 제목으로만 맞추는 상태가 됐다(로그의 [주의]). 검색 API 가 돌려주는 id 기준으로
+  # 적어야 한다 — 주소창 id 와 다를 수 있다.
   - worksheet: "파테코 - Rainy day"
-    video_id: "Ep6o9_n0taU"
+    video_id: "7DnwSeOsejE"
     query: "Rainy day 파테코"
     artist: ["PATEKO", "파테코"]
     title: "Rainy day (feat. ASH ISLAND, Skinny Brown)"

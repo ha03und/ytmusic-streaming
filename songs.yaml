@@ -35,9 +35,10 @@ songs:
 
   # 2026-08-13 수정: title 이 없어서 도유카의 다른 곡
   # ("웃어넘기기엔 너무 사랑했던 너라", 2440만회)이 잡혔다. title 추가.
+  # 2026-08-14 수정: 검색어에 하이픈을 넣으면 안 잡힌다(탭 이름과 검색어는 별개).
   - worksheet: "도유카 - Around"
     video_id: "T5MC_nHkF6E"
-    query: "around 도유카"
+    query: "도유카 Around"
     artist: "도유카"
     title: "Around"
 
@@ -77,9 +78,10 @@ songs:
     artist: ["프로미스나인", "fromis_9"]
     title: "Love Me Back"
 
+  # 2026-08-14 수정: '서랍 10CM' 으로는 재생수가 안 붙어온다. 곡명만으로 검색.
   - worksheet: "10CM"
     video_id: "tnsggn5cNmU"
-    query: "서랍 10CM"
+    query: "서랍"
     artist: "10CM"
     title: "서랍"
 

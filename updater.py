@@ -146,6 +146,57 @@ def _walk(node, key: str, out: list):
     return out
 
 
+def _cards_from_response(res: dict) -> list[dict]:
+    """youtubei 응답에서 곡 카드를 뽑아 search() 결과와 같은 모양으로 만든다.
+
+    화면에 보이는 부분(flexColumns)만 읽는다. 카드 전체를 훑으면 우클릭 메뉴의
+    '뮤직 비디오 보기' 같은 글자까지 섞여서 곡/동영상 판별이 어긋난다.
+    """
+    out: list[dict] = []
+    for item in _walk(res, "musicResponsiveListItemRenderer", []):
+        texts: list[str] = []
+        for col in item.get("flexColumns") or []:
+            runs = ((col.get("musicResponsiveListItemFlexColumnRenderer") or {})
+                    .get("text") or {}).get("runs") or []
+            texts.append("".join(r.get("text", "") for r in runs))
+        if not texts:
+            continue
+        title, subtitle = texts[0], " ".join(texts[1:])
+        if "재생" not in subtitle:      # '조회수 ○○회'(동영상)는 제외
+            continue
+        vids = _walk(item.get("playlistItemData") or item, "videoId", [])
+        out.append({
+            "title": title,
+            "videoId": vids[0] if vids else None,
+            "views": subtitle,          # parse_plays 가 '2783만회 재생'을 읽는다
+            "artists": [{"name": subtitle}],
+            "resultType": "song",
+        })
+    return out
+
+
+# 유튜브 뮤직에서 검색 후 '노래' 탭을 눌렀을 때 붙는 필터값.
+SONGS_FILTER = "EgWKAQIIAWoMEAMQBBAJEA4QChAF"
+
+
+def filtered_cards(yt: YTMusic, query: str) -> list[dict]:
+    """'노래' 탭을 누른 것과 같은 검색.
+
+    브라우저에서 '이별후회' 검색 후 노래 탭에 들어가면 2783만회가 보이는데,
+    일반 검색 결과에는 그 숫자가 안 붙어오는 곡이 있다. 그래서 같은 요청을
+    엔드포인트로 직접 보내본다.
+    (ytmusicapi 의 search(filter="songs") 는 빈 결과만 와서 쓰지 않는다)
+    """
+    send = getattr(yt, "_send_request", None)
+    if send is None:
+        return []
+    try:
+        return _cards_from_response(send("search", {"query": query,
+                                                    "params": SONGS_FILTER}))
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def suggestion_cards(yt: YTMusic, query: str) -> list[dict]:
     """검색 자동완성(드롭다운)에서 곡 카드를 뽑는다.
 
@@ -164,28 +215,7 @@ def suggestion_cards(yt: YTMusic, query: str) -> list[dict]:
     except Exception:  # noqa: BLE001
         return []
 
-    out: list[dict] = []
-    for item in _walk(res, "musicResponsiveListItemRenderer", []):
-        cols = item.get("flexColumns") or []
-        texts: list[str] = []
-        for col in cols:
-            runs = ((col.get("musicResponsiveListItemFlexColumnRenderer") or {})
-                    .get("text") or {}).get("runs") or []
-            texts.append("".join(r.get("text", "") for r in runs))
-        if not texts:
-            continue
-        title, subtitle = texts[0], " ".join(texts[1:])
-        if "재생" not in subtitle:      # '조회수 ○○회'(동영상)는 제외
-            continue
-        vids = _walk(item.get("playlistItemData") or item, "videoId", [])
-        out.append({
-            "title": title,
-            "videoId": vids[0] if vids else None,
-            "views": subtitle,          # parse_plays 가 '7104만회 재생'을 읽는다
-            "artists": [{"name": subtitle}],
-            "resultType": "song",
-        })
-    return out
+    return _cards_from_response(res)
 
 
 def pick_card(cards: list[dict], cfg: dict) -> tuple[int, str] | None:
@@ -251,12 +281,14 @@ def read_plays(cfg: dict) -> dict:
                 print(f"  [경고] {name}: 검색 실패({q}) {e}")
                 cards = []
 
-            # 검색 결과에 재생수가 없으면 자동완성 드롭다운에서도 찾아본다.
-            # (검색엔 안 붙는데 자동완성엔 붙어오는 곡이 있다)
+            # 일반 검색에 재생수가 안 붙어오면, 브라우저에서 하듯 다른 경로도 본다.
+            #   1) '노래' 탭 (검색 + 필터)
+            #   2) 검색창 자동완성 드롭다운
+            # 둘 다 재생수가 붙어오는 경우가 있어서 순서대로 시도한다.
             if not any(parse_plays(c.get("views")) for c in cards):
-                extra = suggestion_cards(yt, q)
-                if extra:
-                    cards = list(cards) + extra
+                cards = list(cards) + filtered_cards(yt, q)
+            if not any(parse_plays(c.get("views")) for c in cards):
+                cards = list(cards) + suggestion_cards(yt, q)
 
             # 어떤 카드가 왔는지 기록해 둔다(실패했을 때 원인을 보려고)
             for c in cards:

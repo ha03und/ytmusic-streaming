@@ -373,15 +373,15 @@ def read_plays(cfg: dict) -> dict:
 
 def read_dream(cfg: dict) -> dict:
     """태연 '꿈' — 두 버전을 videoId 로 구분한다.
-    셀   = note_video_id (SPECIAL)
-    메모 = 'part.3 ver ○○만회' (main_video_id = Part.3)
+    셀   = main_video_id (Part.3)
+    메모 = 'special ver ○○만회' (note_video_id = SPECIAL)
     """
-    cell = read_plays({**cfg, "video_id": cfg["note_video_id"]})
+    cell = read_plays({**cfg, "video_id": cfg["main_video_id"]})
     try:
-        p3 = read_plays({**cfg, "video_id": cfg["main_video_id"]})
-        cell["note"] = f"part.3 ver {p3['raw'] // 10_000}만회"
+        sp = read_plays({**cfg, "video_id": cfg["note_video_id"]})
+        cell["note"] = f"special ver {sp['raw'] // 10_000}만회"
     except NoPlays:
-        print(f"  [경고] 꿈: part.3 버전을 못 읽어 메모 생략")
+        print(f"  [경고] 꿈: special 버전을 못 읽어 메모 생략")
     return cell
 
 

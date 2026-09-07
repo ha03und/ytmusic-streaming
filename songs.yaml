@@ -60,6 +60,7 @@ songs:
   # 검색어 '다비치 이사랑'(붙여쓰기)으로 자동완성에 재생수가 붙어 오는 것을 확인(4.9억회).
   # video_id 미확인 — 첫 실행 로그의 [주의] 줄에 실제 잡힌 videoId 가 찍히면 적을 것.
   - worksheet: "다비치 - 이 사랑"
+    video_id: "-tCUWBHihu4"   # 2026-09-07 로그에서 확인(4.9억회)
     query: "다비치 이사랑"
     artist: ["다비치", "Davichi"]
     title: "이 사랑"
@@ -114,6 +115,7 @@ songs:
     query: "사랑이 다른 사랑으로 잊혀지네 김나영"
     artist: "김나영"
     title: "사랑이 다른 사랑으로 잊혀지네"
+    max_ratio: 999   # 상한 해제(새 곡). 재생수가 안정되면 이 줄을 지울 것
 
   - worksheet: "꿈"
     mode: "dream"

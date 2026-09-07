@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3h
 """
 스트리밍 현황(주요곡) — 유튜브 뮤직 재생수 자동 기입
 
@@ -316,7 +316,7 @@ def read_plays(cfg: dict) -> dict:
             #   1) '노래' 탭 (검색 + 필터)
             #   2) 검색창 자동완성 드롭다운
             #   3) 그 곡의 앨범 / 아티스트 페이지
-            has_plays = lambda cs: any(parse_plays(c.get("views")) for c in cs)
+            has_plays = lambda cs: any(parse_plays(c.get("views")) for c in cs if not cfg.get("video_id") or c.get("videoId") == cfg.get("video_id"))  # 2026-09-07: 아무 카드가 아니라 '우리 곡' 카드에 재생수가 붙었는지로 판정
             if not has_plays(cards):
                 cards = list(cards) + filtered_cards(yt, q)
             if not has_plays(cards):

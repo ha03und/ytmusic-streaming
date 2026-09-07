@@ -603,7 +603,7 @@ def main() -> None:
                 print(f"[막음] {ws}: {val:,} 이 직전값({prev:,})보다 크게 낮음")
                 blocked.append(ws)
                 continue
-            if val > prev * MAX_RATIO:
+            if val > prev * s.get("max_ratio", MAX_RATIO):
                 print(f"[막음] {ws}: {val:,} 이 직전값({prev:,})의 {MAX_RATIO}배 초과 "
                       f"— 다른 곡일 수 있음")
                 blocked.append(ws)

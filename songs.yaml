@@ -132,3 +132,13 @@ songs:
     query: "Christmas Tree V (뷔)"
     artist: ["뷔", "V"]
     title: "Christmas Tree"
+
+
+  # 2026-09-22 추가: 드라마 '작전명 순정' OST. AHOF(아홉).
+  # (Inst.) 버전(bprxmJxjtl4)이 따로 있으니 video_id 로 반드시 구분한다.
+  - worksheet: "아홉 - Focus On You"
+    video_id: "sM3a7JCrxmo"
+    query: "아홉 Focus"
+    artist: ["AHOF", "아홉"]
+    title: "Focus On You"
+    max_ratio: 999   # 상한 해제(새 곡). 재생수가 안정되면 이 줄을 지울 것

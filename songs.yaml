@@ -142,3 +142,14 @@ songs:
     artist: ["AHOF", "아홉"]
     title: "Focus On You"
     max_ratio: 999   # 상한 해제(새 곡). 재생수가 안정되면 이 줄을 지울 것
+
+
+  # 2026-09-28 추가: 신보. 탭 이름은 쉼표 뒤 공백 없음(박보검,진영).
+  # ⚠ 동명이곡 주의: 벤 '안갯길(Prod. By 진영(B1A4))' — LswcI2jIciw, 2077만회.
+  #   video_id 를 지우면 27배짜리 엉뙡한 값이 들어간다.
+  - worksheet: "박보검,진영 - 안갯길"
+    video_id: "lJUAakFgheU"
+    query: "안갯길"
+    artist: ["박보검", "진영"]
+    title: "안갯길"
+    max_ratio: 999   # 상한 해제(새 곡). 재생수가 안정되면 이 줄을 지울 것
